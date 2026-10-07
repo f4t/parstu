@@ -29,11 +29,26 @@ const state = {
   tab: 'trajets',
   expanded: new Set(),
   joinsCache: {},
+  loading: false,
 };
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Apps Script est lent (cold start) : barre globale + squelettes + spinner boutons.
+function setLoading(on) {
+  state.loading = on;
+  const bar = $('#loadbar');
+  if (bar) bar.classList.toggle('hidden', !on);
+}
+function setBusy(form, on) {
+  const btn = form && form.querySelector('button[type="submit"]');
+  if (!btn) return;
+  btn.classList.toggle('btn-busy', on);
+  btn.disabled = on;
+}
+const skeletonCards = (n) => Array.from({ length: n }, () => '<div class="skeleton h-24"></div>').join('');
 
 // Cellules Sheets : ISO "2026-12-31T16:00:00.000Z", "2026-12-31", ou dechet.
 function fmtDate(v) {
@@ -78,7 +93,12 @@ async function deleteRow(id, kind) {
   const token = lsGet(store)[id];
   if (!token) return;
   if (!confirm('Supprimer cette fiche ?')) return;
-  await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=delete&id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}&kind=${encodeURIComponent(kind || 'trip')}`);
+  setLoading(true);
+  try {
+    await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=delete&id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}&kind=${encodeURIComponent(kind || 'trip')}`);
+  } finally {
+    setLoading(false);
+  }
   await loadData();
 }
 
@@ -86,6 +106,8 @@ async function deleteRow(id, kind) {
 // Data
 // ------------------------------------------------------------------
 async function loadData() {
+  setLoading(true);
+  render();
   try {
     const res = await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=list`);
     const data = await res.json();
@@ -95,6 +117,8 @@ async function loadData() {
     state.trips = [];
     state.attente = [];
     console.error(e);
+  } finally {
+    setLoading(false);
   }
   render();
 }
@@ -107,12 +131,15 @@ function render() {
 
 async function loadJoins(tripId) {
   if (state.joinsCache[tripId]) return;
+  setLoading(true);
   try {
     const res = await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=joins&trip_id=${encodeURIComponent(tripId)}`);
     const data = await res.json();
     state.joinsCache[tripId] = data.ok ? data.joins : [];
   } catch {
     state.joinsCache[tripId] = [];
+  } finally {
+    setLoading(false);
   }
 }
 
@@ -206,7 +233,8 @@ async function submitJoin(e) {
   const payload = Object.fromEntries(new FormData(form).entries());
   payload.action = 'join';
   payload.trip_id = tripId;
-  msg.textContent = 'Envoi…';
+  msg.textContent = '';
+  setBusy(form, true); setLoading(true);
   try {
     const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
       method: 'POST',
@@ -224,6 +252,8 @@ async function submitJoin(e) {
     }
   } catch {
     msg.textContent = 'Erreur réseau';
+  } finally {
+    setBusy(form, false); setLoading(false);
   }
 }
 
@@ -233,7 +263,9 @@ function renderTrips() {
     String(a.date).localeCompare(String(b.date)) || String(a.heure).localeCompare(String(b.heure)));
   const list = trips.length
     ? trips.map(tripCard).join('')
-    : '<p class="text-center text-slate-400 py-8">Aucun trajet publié pour l\u2019instant.<br>Publie le premier !</p>';
+    : state.loading
+      ? `<div class="space-y-3 mt-3">${skeletonCards(3)}</div>`
+      : '<p class="text-center text-slate-400 py-8">Aucun trajet publié pour l\u2019instant.<br>Publie le premier !</p>';
   el.innerHTML = `
     <button data-open-trip class="w-full bg-teal-700 text-white font-semibold py-2.5 rounded-lg shadow">+ Publier un trajet</button>
     ${list}`;
@@ -276,7 +308,9 @@ function renderAttente() {
   const already = state.attente.some((a) => mine[a.id]);
   const cards = state.attente.length
     ? state.attente.map(attenteCard).join('')
-    : '<p class="text-center text-slate-400 py-6">Personne en attente pour l\u2019instant.</p>';
+    : state.loading
+      ? `<div class="space-y-3 mt-3">${skeletonCards(2)}</div>`
+      : '<p class="text-center text-slate-400 py-6">Personne en attente pour l\u2019instant.</p>';
   el.innerHTML = `
     ${already ? '<p class="text-xs text-teal-700 font-medium">✓ tu es sur la liste d\u2019attente</p>' : attenteFormHtml()}
     <p class="text-xs text-slate-400">Conducteur ? Parcourir cette liste et contacter directement les passagers pour leur proposer une place.</p>
@@ -294,7 +328,8 @@ async function submitAttente(e) {
   const msg = $('.attmsg', form);
   const payload = Object.fromEntries(new FormData(form).entries());
   payload.action = 'attente';
-  msg.textContent = 'Envoi…';
+  msg.textContent = '';
+  setBusy(form, true); setLoading(true);
   try {
     const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
       method: 'POST',
@@ -310,6 +345,8 @@ async function submitAttente(e) {
     }
   } catch {
     msg.textContent = 'Erreur réseau';
+  } finally {
+    setBusy(form, false); setLoading(false);
   }
 }
 
@@ -367,7 +404,8 @@ async function submitTrip(e) {
   e.preventDefault();
   const msg = $('.formmsg', form);
   const payload = Object.fromEntries(new FormData(form).entries());
-  msg.textContent = 'Envoi…';
+  msg.textContent = '';
+  setBusy(form, true); setLoading(true);
   try {
     const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
       method: 'POST',
@@ -385,6 +423,8 @@ async function submitTrip(e) {
     }
   } catch {
     msg.textContent = 'Erreur réseau';
+  } finally {
+    setBusy(form, false); setLoading(false);
   }
 }
 
