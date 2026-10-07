@@ -7,8 +7,8 @@ const CONFIG = {
   // Optionnel : lieu de l'evenement pour centrer la carte. Mettre null sinon.
   EVENT: null, // ex: { name: 'Festival Guy Roux', lat: 47.0, lng: 2.0, zoom: 12 }
 
-  // Repli si pas d'EVENT
-  DEFAULT_CENTER: [46.6, 2.4],
+  // Repli si pas d'EVENT (centrage par defaut : Montreal)
+  DEFAULT_CENTER: [45.5017, -73.5673],
   DEFAULT_ZOOM: 6,
 };
 
@@ -17,7 +17,7 @@ const state = {
   tab: 'offres',
   filters: { origin: '', dest: '', date: '' },
   map: null,
-  markers: [],
+  overlay: null,
 };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -137,6 +137,7 @@ function initMap() {
     maxZoom: 19,
     attribution: '&copy; OpenStreetMap',
   }).addTo(state.map);
+  state.overlay = L.layerGroup().addTo(state.map);
 }
 
 const icon = (color) => L.divIcon({
@@ -146,22 +147,28 @@ const icon = (color) => L.divIcon({
 });
 
 function renderMap(rows) {
-  if (!state.map) return;
-  state.markers.forEach((m) => state.map.removeLayer(m));
-  state.markers = [];
+  if (!state.map || !state.overlay) return;
+  state.overlay.clearLayers();
   const bounds = [];
   rows.forEach((r) => {
-    if (r.depart_lat && r.depart_lng) {
-      const m = L.marker([+r.depart_lat, +r.depart_lng], { icon: icon('#0f766e') })
-        .bindPopup(`<b>Départ</b> ${esc(r.depart_txt)}<br>${esc(r.nom)} · ${esc(r.date || '')} ${esc(r.heure || '')}`)
-        .addTo(state.map);
-      state.markers.push(m); bounds.push([+r.depart_lat, +r.depart_lng]);
+    const hasD = r.depart_lat && r.depart_lng;
+    const hasA = r.arrivee_lat && r.arrivee_lng;
+    const lineColor = r.type === 'offre' ? '#0f766e' : '#d97706';
+    if (hasD && hasA) {
+      L.polyline([[+r.depart_lat, +r.depart_lng], [+r.arrivee_lat, +r.arrivee_lng]],
+        { color: lineColor, weight: 3, opacity: 0.7 }).addTo(state.overlay);
     }
-    if (r.arrivee_lat && r.arrivee_lng) {
-      const m = L.marker([+r.arrivee_lat, +r.arrivee_lng], { icon: icon('#d97706') })
+    if (hasD) {
+      L.marker([+r.depart_lat, +r.depart_lng], { icon: icon('#0f766e') })
+        .bindPopup(`<b>Départ</b> ${esc(r.depart_txt)}<br>${esc(r.nom)} · ${esc(fmtDate(r.date))} ${esc(fmtTime(r.heure))}`)
+        .addTo(state.overlay);
+      bounds.push([+r.depart_lat, +r.depart_lng]);
+    }
+    if (hasA) {
+      L.marker([+r.arrivee_lat, +r.arrivee_lng], { icon: icon('#d97706') })
         .bindPopup(`<b>Arrivée</b> ${esc(r.arrivee_txt)}<br>${esc(r.nom)}`)
-        .addTo(state.map);
-      state.markers.push(m); bounds.push([+r.arrivee_lat, +r.arrivee_lng]);
+        .addTo(state.overlay);
+      bounds.push([+r.arrivee_lat, +r.arrivee_lng]);
     }
   });
   if (bounds.length > 1) state.map.fitBounds(bounds, { padding: [30, 30] });
@@ -291,12 +298,13 @@ function setupPickers() {
 // ------------------------------------------------------------------
 function init() {
   if (CONFIG.EVENT) $('#siteTitle').textContent = 'Pars-tu ? · ' + CONFIG.EVENT.name;
+  initMap();
   setupTabs();
   setupFilters();
   setupMapToggle();
   setupForm();
   setupPickers();
   $$('.geo').forEach(setupGeo);
-  loadRides();
+  loadRides().then(() => setTimeout(() => state.map && state.map.invalidateSize(), 50));
 }
 document.addEventListener('DOMContentLoaded', init);
