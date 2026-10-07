@@ -40,7 +40,7 @@ function getCacheSheet_() {
   var sh = ss.getSheetByName(CACHE_SHEET_NAME);
   if (!sh) {
     sh = ss.insertSheet(CACHE_SHEET_NAME);
-    sh.appendRow(['q', 'display', 'lat', 'lng', 'ts']);
+    sh.appendRow(['q', 'display', 'lat', 'lng', 'cc', 'ts']);
   }
   return sh;
 }
@@ -95,11 +95,13 @@ function geocode_(q) {
   var cache = getCacheSheet_();
   var data = cache.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).toLowerCase() === q.toLowerCase()) {
-      return { ok: true, results: [{ display: data[i][1], lat: data[i][2], lng: data[i][3] }] };
-    }
+    if (String(data[i][0]).toLowerCase() !== q.toLowerCase()) continue;
+    var cachedCc = String(data[i][4] || '').toUpperCase();
+    // Entree obsolete (ancien schema sans pays) ou pays non desire -> on ignore le cache.
+    if (GEO_PREFER_COUNTRY && cachedCc !== GEO_PREFER_COUNTRY) break;
+    return { ok: true, results: [{ display: data[i][1], lat: data[i][2], lng: data[i][3] }] };
   }
-  var url = 'https://photon.komoot.io/api/?limit=5'
+  var url = 'https://photon.komoot.io/api/?limit=10'
     + '&lat=' + GEO_BIAS_LAT + '&lon=' + GEO_BIAS_LON
     + '&q=' + encodeURIComponent(q);
   var resp = UrlFetchApp.fetch(url, {
@@ -112,16 +114,17 @@ function geocode_(q) {
   var f = feats[0];
   if (GEO_PREFER_COUNTRY) {
     for (var j = 0; j < feats.length; j++) {
-      if ((feats[j].properties || {}).countrycode === GEO_PREFER_COUNTRY) { f = feats[j]; break; }
+      if (String((feats[j].properties || {}).countrycode || '').toUpperCase() === GEO_PREFER_COUNTRY) { f = feats[j]; break; }
     }
   }
   var p = f.properties || {};
+  var cc = String(p.countrycode || '').toUpperCase();
   var coords = f.geometry.coordinates; // [lng, lat]
   var lng = coords[0], lat = coords[1];
   var display = [p.name, p.city || p.county, p.state, p.country]
     .filter(function (x, i, a) { return x && a.indexOf(x) === i; })
     .join(', ');
-  cache.appendRow([q, display, lat, lng, new Date()]);
+  cache.appendRow([q, display, lat, lng, cc, new Date()]);
   return { ok: true, results: [{ display: display, lat: lat, lng: lng }] };
 }
 

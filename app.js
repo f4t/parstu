@@ -24,6 +24,24 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Cellules Sheets : ISO "2026-12-31T16:00:00.000Z", "2026-12-31", ou dechet "111223-01-02".
+function fmtDate(v) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  const d = new Date(s);
+  if (!isNaN(d) && d.getFullYear() >= 2000 && d.getFullYear() <= 2100)
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  return s;
+}
+function fmtTime(v) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  const hm = s.match(/(\d{2}):(\d{2})/);
+  return hm ? `${hm[1]}:${hm[2]}` : s;
+}
+
 // ------------------------------------------------------------------
 // Data
 // ------------------------------------------------------------------
@@ -83,7 +101,7 @@ function card(r) {
   const del = tokens[r.id]
     ? `<button data-del="${esc(r.id)}" class="wa-del text-sm mt-2 block">[ supprimer ma fiche ]</button>` : '';
   const places = r.type === 'offre' && r.places ? `<span class="wa-meta">· ${esc(r.places)} place(s)</span>` : '';
-  const when = [r.date, r.heure].filter(Boolean).join(' à ');
+  const when = [fmtDate(r.date), fmtTime(r.heure)].filter(Boolean).join(' à ');
   const badge = r.type === 'offre' ? 'wa-badge--offre' : 'wa-badge--demande';
   return `
     <article class="wa-card p-4">
