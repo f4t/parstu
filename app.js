@@ -10,7 +10,7 @@ const CONFIG = {
 
   // L'evenement au centre de l'app (destination implicite de tous les trajets).
   EVENT: {
-    name: 'Mon événement',
+    name: 'Fete du slip 2027',
     lieu: 'Maison symphonique, Montréal',
     lat: 45.5056,
     lng: -73.5716,
