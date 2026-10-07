@@ -91,27 +91,26 @@ function filtered() {
 
 function contactLink(c) {
   const v = String(c).trim();
-  if (/@/.test(v)) return `<a href="mailto:${esc(v)}">${esc(v)}</a>`;
+  if (/@/.test(v)) return `<a class="text-teal-700 underline" href="mailto:${esc(v)}">${esc(v)}</a>`;
   const tel = v.replace(/[^\d+]/g, '');
-  return `<a href="tel:${esc(tel)}">${esc(v)}</a>`;
+  return `<a class="text-teal-700 underline" href="tel:${esc(tel)}">${esc(v)}</a>`;
 }
 
 function card(r) {
   const tokens = myTokens();
   const del = tokens[r.id]
-    ? `<button data-del="${esc(r.id)}" class="wa-del text-sm mt-2 block">[ supprimer ma fiche ]</button>` : '';
-  const places = r.type === 'offre' && r.places ? `<span class="wa-meta">· ${esc(r.places)} place(s)</span>` : '';
+    ? `<button data-del="${esc(r.id)}" class="text-xs text-red-500 mt-2">supprimer ma fiche</button>` : '';
+  const places = r.type === 'offre' && r.places ? `<span class="text-slate-500">· ${esc(r.places)} place(s)</span>` : '';
   const when = [fmtDate(r.date), fmtTime(r.heure)].filter(Boolean).join(' à ');
-  const badge = r.type === 'offre' ? 'wa-badge--offre' : 'wa-badge--demande';
   return `
-    <article class="wa-card p-4">
+    <article class="bg-white rounded-xl shadow p-4">
       <div class="flex items-start justify-between gap-2">
-        <div class="wa-route text-xl leading-tight">${esc(r.depart_txt)} <span class="wa-arrow">→</span> ${esc(r.arrivee_txt)}</div>
-        <span class="wa-badge shrink-0 ${badge}">${r.type === 'offre' ? 'Offre' : 'Demande'}</span>
+        <div class="font-semibold">${esc(r.depart_txt)} <span class="text-slate-400">→</span> ${esc(r.arrivee_txt)}</div>
+        <span class="shrink-0 text-xs px-2 py-0.5 rounded-full ${r.type === 'offre' ? 'bg-teal-100 text-teal-700' : 'bg-amber-100 text-amber-700'}">${r.type === 'offre' ? 'Offre' : 'Demande'}</span>
       </div>
-      <div class="wa-meta text-base mt-1">${when ? esc(when) + ' ' : ''}${places}</div>
-      ${r.commentaire ? `<p class="wa-meta text-base mt-1">${esc(r.commentaire)}</p>` : ''}
-      <div class="wa-contact text-base mt-2">${esc(r.nom)} · ${contactLink(r.contact)}</div>
+      <div class="text-sm text-slate-600 mt-1">${when ? esc(when) + ' ' : ''}${places}</div>
+      ${r.commentaire ? `<p class="text-sm text-slate-500 mt-1">${esc(r.commentaire)}</p>` : ''}
+      <div class="text-sm mt-2">${esc(r.nom)} · ${contactLink(r.contact)}</div>
       ${del}
     </article>`;
 }
@@ -119,20 +118,12 @@ function card(r) {
 function render() {
   const list = $('#list');
   const rows = filtered();
-  updateCounter();
   if (state.tab === 'publier') return;
   list.innerHTML = rows.length
     ? rows.map(card).join('')
-    : `<p class="wa-meta text-center py-8 text-lg">// aucun trajet pour l'instant</p>`;
+    : `<p class="text-center text-slate-400 py-8">Aucun trajet pour l'instant.</p>`;
   $$('[data-del]', list).forEach((b) => b.addEventListener('click', () => deleteRide(b.dataset.del)));
   renderMap(rows);
-}
-
-function updateCounter() {
-  const el = $('#counter');
-  if (!el) return;
-  const n = String(state.rides.length).padStart(3, '0');
-  el.textContent = 'TRAJETS · ' + n;
 }
 
 // ------------------------------------------------------------------
@@ -161,13 +152,13 @@ function renderMap(rows) {
   const bounds = [];
   rows.forEach((r) => {
     if (r.depart_lat && r.depart_lng) {
-      const m = L.marker([+r.depart_lat, +r.depart_lng], { icon: icon('#ffd93b') })
+      const m = L.marker([+r.depart_lat, +r.depart_lng], { icon: icon('#0f766e') })
         .bindPopup(`<b>Départ</b> ${esc(r.depart_txt)}<br>${esc(r.nom)} · ${esc(r.date || '')} ${esc(r.heure || '')}`)
         .addTo(state.map);
       state.markers.push(m); bounds.push([+r.depart_lat, +r.depart_lng]);
     }
     if (r.arrivee_lat && r.arrivee_lng) {
-      const m = L.marker([+r.arrivee_lat, +r.arrivee_lng], { icon: icon('#f5a623') })
+      const m = L.marker([+r.arrivee_lat, +r.arrivee_lng], { icon: icon('#d97706') })
         .bindPopup(`<b>Arrivée</b> ${esc(r.arrivee_txt)}<br>${esc(r.nom)}`)
         .addTo(state.map);
       state.markers.push(m); bounds.push([+r.arrivee_lat, +r.arrivee_lng]);
@@ -197,7 +188,7 @@ function setupGeo(box) {
         const items = (data.results || []).filter((x) => x.display);
         if (!items.length) { sug.classList.add('hidden'); return; }
         sug.innerHTML = items.map((x, i) =>
-          `<li data-i="${i}" class="px-3 py-2 cursor-pointer text-base">${esc(x.display)}</li>`).join('');
+          `<li data-i="${i}" class="px-3 py-2 hover:bg-slate-100 cursor-pointer text-sm">${esc(x.display)}</li>`).join('');
         sug.classList.remove('hidden');
         $$('li', sug).forEach((li) => li.addEventListener('click', () => {
           const x = items[+li.dataset.i];
@@ -220,7 +211,7 @@ function setupForm() {
     const msg = $('#formMsg');
     const fd = new FormData(form);
     const payload = Object.fromEntries(fd.entries());
-    msg.textContent = 'Envoi…'; msg.style.color = 'var(--cream-dim)';
+    msg.textContent = 'Envoi…'; msg.className = 'text-center text-sm text-slate-500';
     try {
       const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
         method: 'POST',
@@ -231,14 +222,14 @@ function setupForm() {
       if (data.ok) {
         saveToken(data.id, data.delete_token);
         form.reset();
-        msg.textContent = 'Publié ! Merci.'; msg.style.color = 'var(--emmental)';
+        msg.textContent = 'Publié ! Merci.'; msg.className = 'text-center text-sm text-teal-700';
         await loadRides();
         setTimeout(() => switchTab(state.tab === 'publier' ? 'offres' : state.tab), 800);
       } else {
-        msg.textContent = 'Erreur : ' + (data.error || 'inconnue'); msg.style.color = 'var(--brick)';
+        msg.textContent = 'Erreur : ' + (data.error || 'inconnue'); msg.className = 'text-center text-sm text-red-600';
       }
     } catch (err) {
-      msg.textContent = 'Erreur réseau'; msg.style.color = 'var(--brick)';
+      msg.textContent = 'Erreur réseau'; msg.className = 'text-center text-sm text-red-600';
     }
   });
 }
@@ -248,7 +239,14 @@ function setupForm() {
 // ------------------------------------------------------------------
 function switchTab(tab) {
   state.tab = tab;
-  $$('.wa-tab').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === tab));
+  $$('.tab').forEach((b) => {
+    const active = b.dataset.tab === tab;
+    b.classList.toggle('bg-teal-600', active);
+    b.classList.toggle('text-white', active);
+    b.classList.toggle('border-teal-600', active);
+    b.classList.toggle('bg-white', !active);
+    b.classList.toggle('border-slate-200', !active);
+  });
   const isForm = tab === 'publier';
   $('#formWrap').classList.toggle('hidden', !isForm);
   $('#list').classList.toggle('hidden', isForm);
@@ -257,7 +255,7 @@ function switchTab(tab) {
 }
 
 function setupTabs() {
-  $$('.wa-tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+  $$('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 }
 
 function setupFilters() {
@@ -267,13 +265,24 @@ function setupFilters() {
 }
 
 function setupMapToggle() {
-  const btn = $('#toggleMap');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
+  $('#toggleMap').addEventListener('click', () => {
     const wrap = $('#mapWrap');
     wrap.classList.toggle('hidden');
     if (!state.map && !wrap.classList.contains('hidden')) initMap();
     if (state.map) setTimeout(() => state.map.invalidateSize(), 50);
+  });
+}
+
+// ------------------------------------------------------------------
+// Pickers date/heure natifs (clic sur tout le champ = calendrier)
+// ------------------------------------------------------------------
+function setupPickers() {
+  const today = new Date().toISOString().slice(0, 10);
+  const formDate = $('#rideForm input[name="date"]');
+  if (formDate) formDate.min = today; // pas de trajet dans le passe
+  $$('input[type="date"], input[type="time"]').forEach((el) => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => { try { el.showPicker(); } catch (e) {} });
   });
 }
 
@@ -286,6 +295,7 @@ function init() {
   setupFilters();
   setupMapToggle();
   setupForm();
+  setupPickers();
   $$('.geo').forEach(setupGeo);
   loadRides();
 }
