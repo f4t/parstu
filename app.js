@@ -61,8 +61,9 @@ async function deleteRide(id) {
 // ------------------------------------------------------------------
 function filtered() {
   const { origin, dest, date } = state.filters;
+  const type = state.tab === 'offres' ? 'offre' : state.tab === 'demandes' ? 'demande' : state.tab;
   return state.rides.filter((r) => {
-    if (r.type !== state.tab) return false;
+    if (r.type !== type) return false;
     if (origin && !String(r.depart_txt).toLowerCase().includes(origin.toLowerCase())) return false;
     if (dest && !String(r.arrivee_txt).toLowerCase().includes(dest.toLowerCase())) return false;
     if (date && String(r.date) !== date) return false;
