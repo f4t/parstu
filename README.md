@@ -2,7 +2,7 @@
 
 Mini-site covoiturage **sans login**, mobile-first, **100 % gratuit et jetable**.
 Backend = une **Google Sheet** + **Google Apps Script**. Front = fichiers statiques.
-Carte **Leaflet + OpenStreetMap**, géocodage **Nominatim** (proxy via Apps Script).
+Carte **Leaflet + OpenStreetMap**, géocodage **Photon (OSM, sans clé)** via proxy Apps Script.
 Le tout gratuit → on supprime le projet Vercel + la Sheet une fois l'événement passé.
 
 ## Architecture
@@ -11,7 +11,7 @@ Navigateur (Vercel statique)
    │  fetch JSON (GET list/geocode/delete, POST create)
    ▼
 Apps Script Web App  ──►  Google Sheet "trajets"
-   └─ proxy Nominatim (User-Agent + cache geocache)
+   └─ proxy Photon (User-Agent + biais Québec + cache geocache)
 ```
 Aucune clé API, aucun serveur à toi, aucune donnée sur un LAN exposé.
 
@@ -19,7 +19,7 @@ Aucune clé API, aucun serveur à toi, aucune donnée sur un LAN exposé.
 1. Crée une Google Sheet vide → **Extensions > Apps Script**.
 2. Colle le contenu de [`apps-script/Code.gs`](apps-script/Code.gs), **enregistre**.
 3. (Optionnel) remplace l'email dans le `User-Agent` de `geocode_` par le tien
-   (politique Nominatim).
+   (bon usage Photon). Le biais Québec est réglable via `GEO_BIAS_LAT/LON`.
 4. **Deploy > New deployment > Web app** :
    - *Execute as* : **Me**
    - *Who has access* : **Anyone**
@@ -39,10 +39,9 @@ EVENT: { name: 'Nom Événement', lat: 47.0, lng: 2.0, zoom: 12 }, // ou null
 
 ## 3. Déployer sur Vercel — ~2 min
 ```bash
-cd projects/covoiturage
 vercel --prod        # projet "Other" / statique, pas de build
 ```
-Ou importer le dossier sur vercel.com (Framework : **Other**, build : vide).
+Ou importer le repo `f4t/parstu` sur vercel.com (Framework : **Other**, build : vide).
 Supprimer le projet Vercel = le site meurt.
 
 ## Modèle de données (onglet `trajets`)
@@ -59,5 +58,5 @@ arrivee_lat · arrivee_lng · date · heure · places · commentaire · ts · vi
 
 ## Limites assumées (esprit "une après-midi")
 - Contact affiché **en clair** (RGPD : données publiques, volontaires, éphémères).
-- Nominatim public = throttled ; le cache Sheet limite les appels.
+- Photon public = throttled ; le cache Sheet limite les appels.
 - Pas de compte, pas de messagerie, pas de temps réel (refresh = rechargement).

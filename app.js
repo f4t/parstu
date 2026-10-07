@@ -2,7 +2,7 @@
 
 const CONFIG = {
   // >>> Coler ici l'URL /exec de ton Apps Script Web App <<<
-  APPS_SCRIPT_URL: 'REMPLACEZ_PAR_URL_EXEC_APPS_SCRIPT',
+  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbw-SNNQK5JhzQ0NDz051gcPNQH6eeg_EZ_-NSgrwQKx92ljH9mRhk3EhAeWCZ_2KrP9/exec',
 
   // Optionnel : lieu de l'evenement pour centrer la carte. Mettre null sinon.
   EVENT: null, // ex: { name: 'Festival Guy Roux', lat: 47.0, lng: 2.0, zoom: 12 }

@@ -12,6 +12,9 @@
 
 var SHEET_NAME = 'trajets';
 var CACHE_SHEET_NAME = 'geocache';
+// Biais geocodage vers le Quebec (ameliore le classement Photon). Ajuste au besoin.
+var GEO_BIAS_LAT = 46.8;
+var GEO_BIAS_LON = -71.2;
 var HEADERS = [
   'id', 'type', 'nom', 'contact',
   'depart_txt', 'depart_lat', 'depart_lng',
@@ -81,8 +84,9 @@ function rowToObject_(row) {
   return o;
 }
 
-// Geocodage proxy (Nominatim) + cache, pour respecter la limite 1 req/s
-// et parce que le navigateur ne peut pas poser un User-Agent custom.
+// Geocodage proxy (Photon / OSM, sans cle) + cache.
+// Photon est passe par le serveur Apps Script car le navigateur ne peut pas
+// poser de User-Agent, et le biais Quebec corrige le classement des villes.
 function geocode_(q) {
   q = String(q).trim();
   if (q.length < 3) return { ok: true, results: [] };
@@ -93,17 +97,22 @@ function geocode_(q) {
       return { ok: true, results: [{ display: data[i][1], lat: data[i][2], lng: data[i][3] }] };
     }
   }
-  var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&q='
-    + encodeURIComponent(q);
+  var url = 'https://photon.komoot.io/api/?limit=1'
+    + '&lat=' + GEO_BIAS_LAT + '&lon=' + GEO_BIAS_LON
+    + '&q=' + encodeURIComponent(q);
   var resp = UrlFetchApp.fetch(url, {
-    headers: { 'User-Agent': 'covoiturage-evenement/1.0 (contact: rema@exemple.org)' },
+    headers: { 'User-Agent': 'parstu-covoiturage/1.0 (contact: rema@exemple.org)' },
     timeout: 8000
   });
-  var arr = JSON.parse(resp.getContentText());
-  if (!arr.length) return { ok: true, results: [] };
-  var top = arr[0];
-  var display = top.display_name;
-  var lat = parseFloat(top.lat), lng = parseFloat(top.lon);
+  var geo = JSON.parse(resp.getContentText());
+  if (!geo.features || !geo.features.length) return { ok: true, results: [] };
+  var f = geo.features[0];
+  var p = f.properties || {};
+  var coords = f.geometry.coordinates; // [lng, lat]
+  var lng = coords[0], lat = coords[1];
+  var display = [p.name, p.city || p.county, p.state, p.country]
+    .filter(function (x, i, a) { return x && a.indexOf(x) === i; })
+    .join(', ');
   cache.appendRow([q, display, lat, lng, new Date()]);
   return { ok: true, results: [{ display: display, lat: lat, lng: lng }] };
 }
