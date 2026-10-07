@@ -1,5 +1,181 @@
+/* Pars-tu ? — skin Winamp/Fromage (cheddar/emmental sur anthracite) */
+
+:root {
+  --bg: #1c1c1c;
+  --bg2: #141414;
+  --panel: #2b2b2b;
+  --panel-hi: #3a3a3a;
+  --bevel-light: #4d4d4d;
+  --bevel-dark: #0d0d0d;
+  --cheddar: #f5a623;
+  --emmental: #ffd93b;
+  --cream: #f4ecd8;
+  --cream-dim: #b8b09c;
+  --brick: #e05a4e;
+  --led: #ffd93b;
+}
+
 html { -webkit-text-size-adjust: 100%; }
-body { padding-bottom: env(safe-area-inset-bottom); }
-#map .leaflet-container { font: inherit; }
-/* evite le zoom moche sur inputs iOS */
+body {
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--bg);
+  background-image:
+    radial-gradient(circle at 50% 0, #262626 0, var(--bg) 60%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px);
+  color: var(--cream);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Polices pixel reservees aux titres/labels */
+h1, .wa-tab, .wa-btn, .wa-led, .wa-titlebar, .wa-badge, label, .wa-section-title {
+  font-family: "VT323", ui-monospace, monospace;
+  letter-spacing: .5px;
+}
+
+/* ---- Biseaux chrome Winamp ---- */
+.wa-bevel {
+  box-shadow:
+    inset -1px -1px 0 var(--bevel-dark),
+    inset 1px 1px 0 var(--bevel-light);
+}
+.wa-bevel-in {
+  box-shadow:
+    inset 1px 1px 0 var(--bevel-dark),
+    inset -1px -1px 0 var(--bevel-light);
+}
+
+/* ---- Barre de titre ---- */
+.wa-titlebar {
+  background: linear-gradient(180deg, var(--panel-hi) 0, var(--panel) 55%, #232323 100%);
+  border-bottom: 2px solid var(--bevel-dark);
+  color: var(--emmental);
+}
+.wa-grabber {
+  height: 6px;
+  background-image: radial-gradient(circle, #555 1px, transparent 1.5px);
+  background-size: 6px 6px;
+  opacity: .5;
+}
+.wa-winbtns { color: var(--cream-dim); font-size: 1.1rem; letter-spacing: 4px; }
+.wa-tagline { color: var(--cheddar); font-size: .95rem; }
+
+/* ---- LED display ---- */
+.wa-led {
+  background: #050505;
+  color: var(--led);
+  text-shadow: 0 0 6px rgba(255,217,59,.6);
+  border: 2px solid var(--bevel-dark);
+  box-shadow: inset 0 0 8px rgba(0,0,0,.9);
+  padding: 2px 10px;
+  font-size: 1.15rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* ---- Panneaux ---- */
+.wa-panel {
+  background: var(--panel);
+  border: 1px solid var(--bevel-dark);
+  box-shadow:
+    inset -1px -1px 0 var(--bevel-dark),
+    inset 1px 1px 0 var(--bevel-light);
+}
+
+/* ---- Boutons ---- */
+.wa-btn {
+  background: linear-gradient(180deg, var(--panel-hi), #262626);
+  color: var(--cream);
+  border: 1px solid var(--bevel-dark);
+  box-shadow:
+    inset -1px -1px 0 var(--bevel-dark),
+    inset 1px 1px 0 var(--bevel-light);
+  min-height: 44px;
+  cursor: pointer;
+  user-select: none;
+}
+.wa-btn:hover { color: var(--emmental); }
+.wa-btn:active {
+  box-shadow:
+    inset 1px 1px 0 var(--bevel-dark),
+    inset -1px -1px 0 var(--bevel-light);
+  transform: translateY(1px);
+}
+.wa-btn--primary {
+  background: linear-gradient(180deg, var(--cheddar), #d98a12);
+  color: #1a1205;
+}
+.wa-btn--primary:hover { color: #1a1205; filter: brightness(1.08); }
+
+/* ---- Onglets ---- */
+.wa-tab {
+  background: linear-gradient(180deg, var(--panel-hi), #262626);
+  color: var(--cream-dim);
+  border: 1px solid var(--bevel-dark);
+  box-shadow:
+    inset -1px -1px 0 var(--bevel-dark),
+    inset 1px 1px 0 var(--bevel-light);
+  min-height: 44px;
+  font-size: 1.15rem;
+  cursor: pointer;
+}
+.wa-tab.is-active {
+  background: #101010;
+  color: var(--emmental);
+  box-shadow:
+    inset 1px 1px 0 var(--bevel-dark),
+    inset -1px -1px 0 var(--bevel-light),
+    inset 0 -3px 0 var(--cheddar);
+}
+
+/* ---- Champs ---- */
+.wa-input {
+  background: #101010;
+  color: var(--cream);
+  border: 1px solid var(--bevel-dark);
+  box-shadow:
+    inset 1px 1px 0 var(--bevel-dark),
+    inset -1px -1px 0 var(--bevel-light);
+  min-height: 44px;
+}
+.wa-input::placeholder { color: #6f6a5c; }
+.wa-input:focus { outline: none; box-shadow: inset 1px 1px 0 var(--bevel-dark), inset -1px -1px 0 var(--bevel-light), 0 0 0 1px var(--cheddar); }
+.wa-input option { background: #101010; color: var(--cream); }
+
+/* ---- Cartes de trajet ---- */
+.wa-card {
+  background: var(--panel);
+  border: 1px solid var(--bevel-dark);
+  box-shadow:
+    inset -1px -1px 0 var(--bevel-dark),
+    inset 1px 1px 0 var(--bevel-light);
+}
+.wa-route { color: var(--cream); }
+.wa-arrow { color: var(--cheddar); }
+.wa-meta { color: var(--cream-dim); }
+.wa-contact a { color: var(--emmental); text-decoration: none; border-bottom: 1px dotted var(--cheddar); }
+.wa-del { color: var(--brick); background: none; border: none; cursor: pointer; font-family: "VT323", monospace; }
+.wa-del:hover { text-decoration: underline; }
+
+.wa-badge { font-size: .95rem; padding: 1px 8px; border: 1px solid var(--bevel-dark); }
+.wa-badge--offre { background: var(--emmental); color: #1a1205; }
+.wa-badge--demande { background: var(--cheddar); color: #1a1205; }
+
+/* ---- Suggestions geocodage ---- */
+.geo-suggest { background: #101010 !important; border: 1px solid var(--cheddar) !important; }
+.geo-suggest li { color: var(--cream); }
+.geo-suggest li:hover { background: var(--panel-hi); }
+
+/* ---- Leaflet skin ---- */
+.leaflet-container { background: #101010; font-family: "VT323", monospace; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--panel);
+  color: var(--cream);
+  border: 1px solid var(--cheddar);
+  box-shadow: 0 0 0 1px var(--bevel-dark), 0 3px 10px rgba(0,0,0,.6);
+}
+.leaflet-popup-content b { color: var(--emmental); }
+.leaflet-bar a { background: var(--panel); color: var(--cream); border-color: var(--bevel-dark); }
+.leaflet-bar a:hover { background: var(--panel-hi); }
+
+/* inputs iOS: evite le zoom auto */
 input, textarea, select { font-size: 16px; }
