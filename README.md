@@ -8,9 +8,9 @@ Le tout gratuit → on supprime le projet Vercel + la Sheet une fois l'événeme
 ## Architecture
 ```
 Navigateur (Vercel statique)
-   │  fetch JSON (GET list/geocode/delete, POST create)
+   │  fetch JSON (GET list/geocode/delete/joins, POST create/join)
    ▼
-Apps Script Web App  ──►  Google Sheet "trajets"
+Apps Script Web App  ──►  Google Sheet "trajets" + "joins"
    └─ proxy Photon (User-Agent + biais Québec + cache geocache)
 ```
 Aucune clé API, aucun serveur à toi, aucune donnée sur un LAN exposé.
@@ -25,9 +25,12 @@ Aucune clé API, aucun serveur à toi, aucune donnée sur un LAN exposé.
    - *Who has access* : **Anyone**
 5. Copie l'**URL `/exec`**.
 
-> La sheet crée automatiquement les onglets `trajets` (données) et `geocache`
-> (cache géocodage) à la première requête. Les orgas peuvent passer une ligne en
-> `visible=false` pour la masquer sans la supprimer.
+> La sheet crée automatiquement les onglets `trajets` (données), `geocache`
+> (cache géocodage) et `joins` (demandes « rejoindre ») à la première requête.
+> Les orgas peuvent passer une ligne en `visible=false` pour la masquer sans la supprimer.
+>
+> ⚠️ Après chaque modification de `Code.gs` : **Deploy > Manage deployments >
+> Edit > Version : New version > Deploy** (sinon l'ancienne version reste servie).
 
 ## 2. Front — config
 Dans [`app.js`](app.js), édite `CONFIG` :
@@ -50,6 +53,19 @@ arrivee_lat · arrivee_lng · date · heure · places · commentaire · ts · vi
 
 - `token` : secret de suppression par l'auteur (jamais renvoyé au front).
 - `visible` : modération manuelle par les orgas.
+
+## Modèle de données (onglet `joins`)
+`id · ride_id · nom · contact · places · message · ts`
+
+- Une ligne = une demande de place sur une offre (`ride_id`).
+- Liste **publique** ; les N premiers (ordre d'arrivée, cumul `places`) sont
+  affichés « confirmés », les suivants « attente » — **indicatif**, pas de
+  réservation atomique (Sheets oblige) : le conducteur garde la main.
+
+## Matching offre ↔ demande (côté client)
+Calculé dans le navigateur sur les lat/lng géocodées : **même date**,
+départ ≤ `MATCH_RADIUS_KM` (25 km), arrivée ≤ 25 km, heures ±
+`MATCH_HOURS_TOLERANCE` (2 h) si renseignées des deux côtés.
 
 ## Anti-abus (léger, sans login)
 - Honeypot caché (`website`) + contact obligatoire.

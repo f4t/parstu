@@ -12,6 +12,8 @@
 
 var SHEET_NAME = 'trajets';
 var CACHE_SHEET_NAME = 'geocache';
+var JOIN_SHEET_NAME = 'joins';
+var JOIN_HEADERS = ['id', 'ride_id', 'nom', 'contact', 'places', 'message', 'ts'];
 // Biais geocodage vers le Quebec (ameliore le classement Photon). Ajuste au besoin.
 var GEO_BIAS_LAT = 46.8;
 var GEO_BIAS_LON = -71.2;
@@ -45,6 +47,16 @@ function getCacheSheet_() {
   return sh;
 }
 
+function getJoinSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(JOIN_SHEET_NAME);
+  if (!sh) {
+    sh = ss.insertSheet(JOIN_SHEET_NAME);
+    sh.appendRow(JOIN_HEADERS);
+  }
+  return sh;
+}
+
 function json_(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
@@ -60,6 +72,7 @@ function doGet(e) {
     if (action === 'list') return json_({ ok: true, rides: listRides_() });
     if (action === 'geocode') return json_(geocode_(e.parameter.q || ''));
     if (action === 'delete') return json_(deleteRide_(e.parameter.id, e.parameter.token));
+    if (action === 'joins') return json_(listJoins_(e.parameter.ride_id));
     return json_({ ok: false, error: 'action inconnue' });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -70,14 +83,51 @@ function listRides_() {
   var sh = getSheet_();
   var values = sh.getDataRange().getValues();
   if (values.length < 2) return [];
+  var counts = joinCounts_();
   var out = [];
   for (var i = 1; i < values.length; i++) {
     var r = rowToObject_(values[i]);
     if (r.visible === false || r.visible === 'false' || r.visible === '') continue;
     delete r.token; // jamais expose
+    var c = counts[String(r.id)];
+    r.join_count = c ? c.count : 0;
+    r.join_seats = c ? c.seats : 0;
     out.push(r);
   }
   return out;
+}
+
+// Nombre de demandes + sieges demandes par offre (une seule passe sur la feuille joins).
+function joinCounts_() {
+  var counts = {};
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(JOIN_SHEET_NAME);
+  if (!sh) return counts;
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    var rid = String(data[i][1]);
+    if (!counts[rid]) counts[rid] = { count: 0, seats: 0 };
+    counts[rid].count++;
+    counts[rid].seats += Number(data[i][4] || 1);
+  }
+  return counts;
+}
+
+// Liste publique des demandes d'une offre, triees par arrivee (1ers = confirmes, suite = attente).
+function listJoins_(rideId) {
+  if (!rideId) return { ok: false, error: 'ride_id requis' };
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(JOIN_SHEET_NAME);
+  if (!sh) return { ok: true, joins: [] };
+  var data = sh.getDataRange().getValues();
+  var out = [];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][1]) !== String(rideId)) continue;
+    out.push({
+      id: data[i][0], nom: data[i][2], contact: data[i][3],
+      places: data[i][4], message: data[i][5], ts: data[i][6]
+    });
+  }
+  out.sort(function (a, b) { return new Date(a.ts) - new Date(b.ts); });
+  return { ok: true, joins: out };
 }
 
 function rowToObject_(row) {
@@ -150,6 +200,7 @@ function doPost(e) {
     var b = JSON.parse(e.postData.contents);
     // honeypot : le champ cache "website" doit etre vide
     if (b.website) return json_({ ok: false, error: 'spam' });
+    if (b.action === 'join') return json_(joinRide_(b));
     if (!b.type || !b.nom || !b.contact || !b.depart_txt || !b.arrivee_txt) {
       return json_({ ok: false, error: 'champs requis manquants' });
     }
@@ -168,4 +219,31 @@ function doPost(e) {
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   }
+}
+
+// ------------------------------------------------------------------
+// POST action=join : demande d'une place sur une offre
+// ------------------------------------------------------------------
+function joinRide_(b) {
+  if (!b.ride_id || !b.nom || !b.contact) return { ok: false, error: 'champs requis manquants' };
+  var sh = getSheet_();
+  var data = sh.getDataRange().getValues();
+  var found = false;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) !== String(b.ride_id)) continue;
+    var visible = data[i][HEADERS.indexOf('visible')];
+    if (visible === false || visible === 'false' || visible === '') break;
+    if (String(data[i][1]) !== 'offre') return { ok: false, error: 'reserve aux offres' };
+    found = true;
+    break;
+  }
+  if (!found) return { ok: false, error: 'offre introuvable' };
+  var places = parseInt(b.places, 10);
+  places = isNaN(places) ? 1 : Math.max(1, Math.min(9, places));
+  var id = Utilities.getUuid().slice(0, 8);
+  getJoinSheet_().appendRow([
+    id, String(b.ride_id), String(b.nom).slice(0, 60), String(b.contact).slice(0, 80),
+    places, String(b.message || '').slice(0, 200), new Date()
+  ]);
+  return { ok: true, id: id };
 }

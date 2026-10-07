@@ -10,6 +10,10 @@ const CONFIG = {
   // Repli si pas d'EVENT (centrage par defaut : Montreal)
   DEFAULT_CENTER: [45.5017, -73.5673],
   DEFAULT_ZOOM: 6,
+
+  // Matching offre <-> demande
+  MATCH_RADIUS_KM: 25,
+  MATCH_HOURS_TOLERANCE: 2,
 };
 
 const state = {
@@ -18,6 +22,9 @@ const state = {
   filters: { origin: '', dest: '', date: '' },
   map: null,
   overlay: null,
+  expanded: new Set(),
+  joinsCache: {},
+  joined: {},
 };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -66,6 +73,15 @@ function saveToken(id, token) {
   localStorage.setItem('covo_tokens', JSON.stringify(t));
 }
 
+function myJoins() {
+  try { return JSON.parse(localStorage.getItem('covo_joins') || '{}'); }
+  catch { return {}; }
+}
+function saveJoin(rideId, id) {
+  const j = myJoins(); j[rideId] = id;
+  localStorage.setItem('covo_joins', JSON.stringify(j));
+}
+
 async function deleteRide(id) {
   const token = myTokens()[id];
   if (!token) return;
@@ -96,6 +112,159 @@ function contactLink(c) {
   return `<a class="text-teal-700 underline" href="tel:${esc(tel)}">${esc(v)}</a>`;
 }
 
+// ------------------------------------------------------------------
+// Matching offre <-> demande (geodistance + date + heure)
+// ------------------------------------------------------------------
+function haversine(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(a));
+}
+function dateKey(v) {
+  const s = String(v || '').trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[0];
+  const d = new Date(s);
+  if (!isNaN(d) && d.getFullYear() >= 2000 && d.getFullYear() <= 2100)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return '';
+}
+function hourMin(v) {
+  const m = String(v || '').match(/(\d{1,2}):(\d{2})/);
+  return m ? (+m[1]) * 60 + (+m[2]) : null;
+}
+function isMatch(a, b) {
+  const geo = (r) => r.depart_lat && r.depart_lng && r.arrivee_lat && r.arrivee_lng;
+  if (!geo(a) || !geo(b)) return false;
+  const da = dateKey(a.date);
+  if (!da || da !== dateKey(b.date)) return false;
+  if (haversine(+a.depart_lat, +a.depart_lng, +b.depart_lat, +b.depart_lng) > CONFIG.MATCH_RADIUS_KM) return false;
+  if (haversine(+a.arrivee_lat, +a.arrivee_lng, +b.arrivee_lat, +b.arrivee_lng) > CONFIG.MATCH_RADIUS_KM) return false;
+  const ha = hourMin(a.heure), hb = hourMin(b.heure);
+  if (ha !== null && hb !== null && Math.abs(ha - hb) > CONFIG.MATCH_HOURS_TOLERANCE * 60) return false;
+  return true;
+}
+function matchesFor(r) {
+  const opp = r.type === 'offre' ? 'demande' : 'offre';
+  return state.rides.filter((o) => o.type === opp && isMatch(r, o));
+}
+
+function miniCard(m) {
+  const when = [fmtDate(m.date), fmtTime(m.heure)].filter(Boolean).join(' à ');
+  const places = m.type === 'offre' && m.places ? ` · ${esc(m.places)} pl.` : '';
+  return `<div class="bg-slate-50 rounded-lg p-2 text-xs">
+    <div class="font-medium">${esc(m.depart_txt)} <span class="text-slate-400">→</span> ${esc(m.arrivee_txt)}</div>
+    <div class="text-slate-500">${esc(when)}${places} · ${esc(m.nom)} · ${contactLink(m.contact)}</div>
+  </div>`;
+}
+
+function matchSection(r) {
+  const ms = matchesFor(r);
+  if (!ms.length) return '';
+  const key = 'match:' + r.id;
+  const label = r.type === 'offre'
+    ? `${ms.length} demande(s) correspondante(s)`
+    : `${ms.length} offre(s) correspondante(s)`;
+  const body = state.expanded.has(key)
+    ? `<div class="mt-2 space-y-2 border-t border-slate-100 pt-2">${ms.map(miniCard).join('')}</div>`
+    : '';
+  return `<button data-match="${esc(r.id)}" class="text-xs text-teal-700 underline">${label}</button>${body}`;
+}
+
+// ------------------------------------------------------------------
+// Rejoindre une offre (demandes de places, liste d'attente indicative)
+// ------------------------------------------------------------------
+async function loadJoins(rideId) {
+  if (state.joinsCache[rideId]) return;
+  try {
+    const res = await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=joins&ride_id=${encodeURIComponent(rideId)}`);
+    const data = await res.json();
+    state.joinsCache[rideId] = data.ok ? data.joins : [];
+  } catch {
+    state.joinsCache[rideId] = [];
+  }
+}
+
+function joinSection(r) {
+  const n = Number(r.join_count) || 0;
+  let out = '<div class="flex flex-wrap items-center gap-3 mt-2">';
+  out += state.joined[r.id]
+    ? '<span class="text-xs text-teal-700 font-medium">✓ demande envoyée</span>'
+    : `<button data-join="${esc(r.id)}" class="text-xs bg-teal-700 text-white px-3 py-1.5 rounded-lg font-medium">Rejoindre</button>`;
+  if (n) out += `<button data-joins="${esc(r.id)}" class="text-xs text-teal-700 underline">${n} demande(s)</button>`;
+  out += '</div>';
+  if (state.expanded.has('joinform:' + r.id)) out += joinFormHtml(r);
+  if (state.expanded.has('joins:' + r.id)) out += joinListHtml(r);
+  return out;
+}
+
+function joinFormHtml(r) {
+  return `<form data-joinform="${esc(r.id)}" class="mt-2 space-y-2 bg-slate-50 rounded-lg p-3 text-sm">
+    <input name="nom" required maxlength="60" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Ton prénom" />
+    <input name="contact" required maxlength="80" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Téléphone ou email" />
+    <input name="places" type="number" min="1" max="9" value="1" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Places demandées" />
+    <input name="message" maxlength="200" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Message (optionnel)" />
+    <button type="submit" class="w-full bg-teal-700 text-white font-semibold py-2 rounded-lg">Envoyer ma demande</button>
+    <p class="joinmsg text-center text-xs text-slate-500"></p>
+  </form>`;
+}
+
+function joinListHtml(r) {
+  const joins = state.joinsCache[r.id];
+  if (!joins) return '<p class="text-xs text-slate-400 mt-2">Chargement…</p>';
+  if (!joins.length) return '<p class="text-xs text-slate-400 mt-2">Aucune demande pour l\u2019instant.</p>';
+  const places = Math.max(1, Number(r.places) || 1);
+  let used = 0;
+  const rows = joins.map((j) => {
+    const seats = Math.max(1, Number(j.places) || 1);
+    const ok = used + seats <= places;
+    used += seats;
+    return `<div class="text-xs bg-slate-50 rounded-lg p-2">
+      <div class="flex items-center justify-between gap-2">
+        <span>${esc(j.nom)} · ${contactLink(j.contact)} · ${seats} pl.</span>
+        <span class="shrink-0 px-2 py-0.5 rounded-full ${ok ? 'bg-teal-100 text-teal-700' : 'bg-amber-100 text-amber-700'}">${ok ? 'confirmé' : 'attente'}</span>
+      </div>
+      ${j.message ? `<p class="text-slate-500 mt-1">${esc(j.message)}</p>` : ''}
+    </div>`;
+  }).join('');
+  return `<div class="mt-2 space-y-2 border-t border-slate-100 pt-2">
+    <p class="text-xs text-slate-400">${places} place(s) · statuts indicatifs, le conducteur garde la main</p>
+    ${rows}
+  </div>`;
+}
+
+async function submitJoin(e) {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const rideId = form.dataset.joinform;
+  const msg = $('.joinmsg', form);
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.action = 'join';
+  payload.ride_id = rideId;
+  msg.textContent = 'Envoi…';
+  try {
+    const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      saveJoin(rideId, data.id);
+      state.joined = myJoins();
+      state.expanded.delete('joinform:' + rideId);
+      delete state.joinsCache[rideId];
+      await loadRides();
+    } else {
+      msg.textContent = data.error || 'Erreur';
+    }
+  } catch {
+    msg.textContent = 'Erreur réseau';
+  }
+}
+
 function card(r) {
   const tokens = myTokens();
   const del = tokens[r.id]
@@ -111,6 +280,8 @@ function card(r) {
       <div class="text-sm text-slate-600 mt-1">${when ? esc(when) + ' ' : ''}${places}</div>
       ${r.commentaire ? `<p class="text-sm text-slate-500 mt-1">${esc(r.commentaire)}</p>` : ''}
       <div class="text-sm mt-2">${esc(r.nom)} · ${contactLink(r.contact)}</div>
+      ${r.type === 'offre' ? joinSection(r) : ''}
+      ${matchSection(r)}
       ${del}
     </article>`;
 }
@@ -123,7 +294,23 @@ function render() {
     ? rows.map(card).join('')
     : `<p class="text-center text-slate-400 py-8">Aucun trajet pour l'instant.</p>`;
   $$('[data-del]', list).forEach((b) => b.addEventListener('click', () => deleteRide(b.dataset.del)));
+  $$('[data-match]', list).forEach((b) =>
+    b.addEventListener('click', () => toggleExpand('match:' + b.dataset.match)));
+  $$('[data-join]', list).forEach((b) =>
+    b.addEventListener('click', () => toggleExpand('joinform:' + b.dataset.join)));
+  $$('[data-joins]', list).forEach((b) =>
+    b.addEventListener('click', async () => {
+      await loadJoins(b.dataset.joins);
+      toggleExpand('joins:' + b.dataset.joins);
+    }));
+  $$('[data-joinform]', list).forEach((f) => f.addEventListener('submit', submitJoin));
   renderMap(rows);
+}
+
+function toggleExpand(key) {
+  if (state.expanded.has(key)) state.expanded.delete(key);
+  else state.expanded.add(key);
+  render();
 }
 
 // ------------------------------------------------------------------
@@ -297,6 +484,7 @@ function setupPickers() {
 // Init
 // ------------------------------------------------------------------
 function init() {
+  state.joined = myJoins();
   if (CONFIG.EVENT) $('#siteTitle').textContent = 'Pars-tu ? · ' + CONFIG.EVENT.name;
   initMap();
   setupTabs();
