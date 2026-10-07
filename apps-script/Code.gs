@@ -15,6 +15,8 @@ var CACHE_SHEET_NAME = 'geocache';
 // Biais geocodage vers le Quebec (ameliore le classement Photon). Ajuste au besoin.
 var GEO_BIAS_LAT = 46.8;
 var GEO_BIAS_LON = -71.2;
+// Code pays a privilegier parmi les resultats Photon (evenement au Canada). '' = aucun.
+var GEO_PREFER_COUNTRY = 'CA';
 var HEADERS = [
   'id', 'type', 'nom', 'contact',
   'depart_txt', 'depart_lat', 'depart_lng',
@@ -97,7 +99,7 @@ function geocode_(q) {
       return { ok: true, results: [{ display: data[i][1], lat: data[i][2], lng: data[i][3] }] };
     }
   }
-  var url = 'https://photon.komoot.io/api/?limit=1'
+  var url = 'https://photon.komoot.io/api/?limit=5'
     + '&lat=' + GEO_BIAS_LAT + '&lon=' + GEO_BIAS_LON
     + '&q=' + encodeURIComponent(q);
   var resp = UrlFetchApp.fetch(url, {
@@ -105,8 +107,14 @@ function geocode_(q) {
     timeout: 8000
   });
   var geo = JSON.parse(resp.getContentText());
-  if (!geo.features || !geo.features.length) return { ok: true, results: [] };
-  var f = geo.features[0];
+  var feats = geo.features || [];
+  if (!feats.length) return { ok: true, results: [] };
+  var f = feats[0];
+  if (GEO_PREFER_COUNTRY) {
+    for (var j = 0; j < feats.length; j++) {
+      if ((feats[j].properties || {}).countrycode === GEO_PREFER_COUNTRY) { f = feats[j]; break; }
+    }
+  }
   var p = f.properties || {};
   var coords = f.geometry.coordinates; // [lng, lat]
   var lng = coords[0], lat = coords[1];
