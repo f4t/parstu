@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <title>Pars-tu ? · Covoiturage</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased">
+
+  <header class="bg-teal-700 text-white px-4 py-3 sticky top-0 z-[500] shadow">
+    <div class="max-w-3xl mx-auto flex items-center justify-between">
+      <h1 id="siteTitle" class="font-bold text-lg leading-tight">Pars-tu&nbsp;? 🚗</h1>
+      <button id="toggleMap" class="text-sm bg-teal-600 hover:bg-teal-500 rounded px-3 py-1.5">Carte</button>
+    </div>
+  </header>
+
+  <!-- Onglets -->
+  <nav class="max-w-3xl mx-auto px-4 pt-3 flex gap-2 text-sm">
+    <button data-tab="offres" class="tab flex-1 py-2 rounded-lg font-medium bg-white shadow border border-teal-600 text-teal-700">Offres</button>
+    <button data-tab="demandes" class="tab flex-1 py-2 rounded-lg font-medium bg-white shadow border border-slate-200">Demandes</button>
+    <button data-tab="publier" class="tab flex-1 py-2 rounded-lg font-medium bg-white shadow border border-slate-200">+ Publier</button>
+  </nav>
+
+  <!-- Filtres -->
+  <section id="filters" class="max-w-3xl mx-auto px-4 pt-3 grid grid-cols-2 gap-2 text-sm">
+    <input id="fOrigin" class="col-span-2 sm:col-span-1 px-3 py-2 rounded-lg border border-slate-300" placeholder="Origine" />
+    <input id="fDest" class="col-span-2 sm:col-span-1 px-3 py-2 rounded-lg border border-slate-300" placeholder="Destination" />
+    <input id="fDate" type="date" class="col-span-2 px-3 py-2 rounded-lg border border-slate-300" />
+  </section>
+
+  <!-- Carte -->
+  <section id="mapWrap" class="max-w-3xl mx-auto px-4 pt-3 hidden">
+    <div id="map" class="h-72 w-full rounded-lg shadow z-0"></div>
+  </section>
+
+  <!-- Liste -->
+  <main id="list" class="max-w-3xl mx-auto px-4 py-4 space-y-3"></main>
+
+  <!-- Formulaire publier -->
+  <section id="formWrap" class="max-w-3xl mx-auto px-4 py-4 hidden">
+    <form id="rideForm" class="bg-white rounded-xl shadow p-4 space-y-3 text-sm">
+      <div class="grid grid-cols-2 gap-2">
+        <label class="flex items-center gap-2"><input type="radio" name="type" value="offre" checked /> J'offre</label>
+        <label class="flex items-center gap-2"><input type="radio" name="type" value="demande" /> Je cherche</label>
+      </div>
+      <input name="nom" required maxlength="60" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Ton prénom / nom" />
+      <input name="contact" required maxlength="80" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Téléphone ou email (affiché publiquement)" />
+
+      <div class="geo relative">
+        <input name="depart_txt" required autocomplete="off" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Départ (ville / adresse)" />
+        <input type="hidden" name="depart_lat" /><input type="hidden" name="depart_lng" />
+        <ul class="geo-suggest hidden absolute z-[600] bg-white border border-slate-200 rounded-lg shadow w-full mt-1 max-h-48 overflow-auto"></ul>
+      </div>
+      <div class="geo relative">
+        <input name="arrivee_txt" required autocomplete="off" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Arrivée (ville / adresse)" />
+        <input type="hidden" name="arrivee_lat" /><input type="hidden" name="arrivee_lng" />
+        <ul class="geo-suggest hidden absolute z-[600] bg-white border border-slate-200 rounded-lg shadow w-full mt-1 max-h-48 overflow-auto"></ul>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <input name="date" type="date" class="px-3 py-2 rounded-lg border border-slate-300" />
+        <input name="heure" type="time" class="px-3 py-2 rounded-lg border border-slate-300" />
+      </div>
+      <input name="places" type="number" min="1" max="9" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Places (conducteur)" />
+      <textarea name="commentaire" maxlength="280" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Commentaire (optionnel) : bagages, fumeur, animaux…"></textarea>
+
+      <!-- honeypot anti-bot, caché -->
+      <input name="website" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
+
+      <button type="submit" class="w-full bg-teal-700 text-white font-semibold py-2.5 rounded-lg">Publier</button>
+      <p id="formMsg" class="text-center text-sm"></p>
+    </form>
+  </section>
+
+  <footer class="max-w-3xl mx-auto px-4 py-6 text-center text-xs text-slate-400">
+    Pars-tu&nbsp;? · site temporaire · données publiques · contact affiché en clair
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
