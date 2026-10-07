@@ -1,37 +1,41 @@
-/* Covoiturage evenement - frontend statique, zero dependance hors Leaflet/Tailwind */
+/* Pars-tu ? - covoiturage d'evenement (concept type Caroster)
+ * Frontend statique : Leaflet + Tailwind CDN, zero build.
+ * L'evenement est defini dans CONFIG.EVENT ; les conducteurs publient des
+ * trajets vers l'evenement, les passagers les rejoignent ou s'inscrivent
+ * a la liste d'attente. */
 
 const CONFIG = {
   // >>> Coler ici l'URL /exec de ton Apps Script Web App <<<
   APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbw-SNNQK5JhzQ0NDz051gcPNQH6eeg_EZ_-NSgrwQKx92ljH9mRhk3EhAeWCZ_2KrP9/exec',
 
-  // Optionnel : lieu de l'evenement pour centrer la carte. Mettre null sinon.
-  EVENT: null, // ex: { name: 'Festival Guy Roux', lat: 47.0, lng: 2.0, zoom: 12 }
-
-  // Repli si pas d'EVENT (centrage par defaut : Montreal)
-  DEFAULT_CENTER: [45.5017, -73.5673],
-  DEFAULT_ZOOM: 6,
-
-  // Matching offre <-> demande
-  MATCH_RADIUS_KM: 25,
-  MATCH_HOURS_TOLERANCE: 2,
+  // L'evenement au centre de l'app (destination implicite de tous les trajets).
+  EVENT: {
+    name: 'Mon événement',
+    lieu: 'Maison symphonique, Montréal',
+    lat: 45.5056,
+    lng: -73.5716,
+    date: '2026-11-01',
+    heure: '09:00',
+    zoom: 11,
+    description: 'Covoiturage pour se rendre à l\u2019événement. Les conducteurs publient leurs trajets, les passagers les rejoignent ou s\u2019inscrivent à la liste d\u2019attente.',
+  },
 };
 
 const state = {
-  rides: [],
-  tab: 'offres',
-  filters: { origin: '', dest: '', date: '' },
   map: null,
-  overlay: null,
+  cluster: null,
+  trips: [],
+  attente: [],
+  tab: 'trajets',
   expanded: new Set(),
   joinsCache: {},
-  joined: {},
 };
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// Cellules Sheets : ISO "2026-12-31T16:00:00.000Z", "2026-12-31", ou dechet "111223-01-02".
+// Cellules Sheets : ISO "2026-12-31T16:00:00.000Z", "2026-12-31", ou dechet.
 function fmtDate(v) {
   const s = String(v || '').trim();
   if (!s) return '';
@@ -48,160 +52,119 @@ function fmtTime(v) {
   const hm = s.match(/(\d{2}):(\d{2})/);
   return hm ? `${hm[1]}:${hm[2]}` : s;
 }
-
-// ------------------------------------------------------------------
-// Data
-// ------------------------------------------------------------------
-async function loadRides() {
-  try {
-    const res = await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=list`);
-    const data = await res.json();
-    state.rides = data.ok ? data.rides : [];
-  } catch (e) {
-    state.rides = [];
-    console.error(e);
-  }
-  render();
-}
-
-function myTokens() {
-  try { return JSON.parse(localStorage.getItem('covo_tokens') || '{}'); }
-  catch { return {}; }
-}
-function saveToken(id, token) {
-  const t = myTokens(); t[id] = token;
-  localStorage.setItem('covo_tokens', JSON.stringify(t));
-}
-
-function myJoins() {
-  try { return JSON.parse(localStorage.getItem('covo_joins') || '{}'); }
-  catch { return {}; }
-}
-function saveJoin(rideId, id) {
-  const j = myJoins(); j[rideId] = id;
-  localStorage.setItem('covo_joins', JSON.stringify(j));
-}
-
-async function deleteRide(id) {
-  const token = myTokens()[id];
-  if (!token) return;
-  if (!confirm('Supprimer cette fiche ?')) return;
-  await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=delete&id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}`);
-  await loadRides();
-}
-
-// ------------------------------------------------------------------
-// Filtres + rendu liste
-// ------------------------------------------------------------------
-function filtered() {
-  const { origin, dest, date } = state.filters;
-  const type = state.tab === 'offres' ? 'offre' : state.tab === 'demandes' ? 'demande' : state.tab;
-  return state.rides.filter((r) => {
-    if (r.type !== type) return false;
-    if (origin && !String(r.depart_txt).toLowerCase().includes(origin.toLowerCase())) return false;
-    if (dest && !String(r.arrivee_txt).toLowerCase().includes(dest.toLowerCase())) return false;
-    if (date && String(r.date) !== date) return false;
-    return true;
-  });
+function whenStr(t) {
+  return [fmtDate(t.date), fmtTime(t.heure)].filter(Boolean).join(' à ');
 }
 
 function contactLink(c) {
   const v = String(c).trim();
   if (/@/.test(v)) return `<a class="text-teal-700 underline" href="mailto:${esc(v)}">${esc(v)}</a>`;
-  const tel = v.replace(/[^\d+]/g, '');
+  const tel = v.replace(/[^\d+()\s-]/g, '');
   return `<a class="text-teal-700 underline" href="tel:${esc(tel)}">${esc(v)}</a>`;
 }
 
 // ------------------------------------------------------------------
-// Matching offre <-> demande (geodistance + date + heure)
+// localStorage (tokens de suppression, mes rejoins)
 // ------------------------------------------------------------------
-function haversine(lat1, lon1, lat2, lon2) {
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * 6371 * Math.asin(Math.sqrt(a));
-}
-function dateKey(v) {
-  const s = String(v || '').trim();
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return m[0];
-  const d = new Date(s);
-  if (!isNaN(d) && d.getFullYear() >= 2000 && d.getFullYear() <= 2100)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return '';
-}
-function hourMin(v) {
-  const m = String(v || '').match(/(\d{1,2}):(\d{2})/);
-  return m ? (+m[1]) * 60 + (+m[2]) : null;
-}
-function isMatch(a, b) {
-  const geo = (r) => r.depart_lat && r.depart_lng && r.arrivee_lat && r.arrivee_lng;
-  if (!geo(a) || !geo(b)) return false;
-  const da = dateKey(a.date);
-  if (!da || da !== dateKey(b.date)) return false;
-  if (haversine(+a.depart_lat, +a.depart_lng, +b.depart_lat, +b.depart_lng) > CONFIG.MATCH_RADIUS_KM) return false;
-  if (haversine(+a.arrivee_lat, +a.arrivee_lng, +b.arrivee_lat, +b.arrivee_lng) > CONFIG.MATCH_RADIUS_KM) return false;
-  const ha = hourMin(a.heure), hb = hourMin(b.heure);
-  if (ha !== null && hb !== null && Math.abs(ha - hb) > CONFIG.MATCH_HOURS_TOLERANCE * 60) return false;
-  return true;
-}
-function matchesFor(r) {
-  const opp = r.type === 'offre' ? 'demande' : 'offre';
-  return state.rides.filter((o) => o.type === opp && isMatch(r, o));
-}
+const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch { return {}; } };
+const lsSet = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+const tripTokens = () => lsGet('covo_tokens');
+const attenteTokens = () => lsGet('covo_attente_tokens');
+const myJoins = () => lsGet('covo_joins');
+function lsPut(store, id, val) { const m = lsGet(store); m[id] = val; lsSet(store, m); }
 
-function miniCard(m) {
-  const when = [fmtDate(m.date), fmtTime(m.heure)].filter(Boolean).join(' à ');
-  const places = m.type === 'offre' && m.places ? ` · ${esc(m.places)} pl.` : '';
-  return `<div class="bg-slate-50 rounded-lg p-2 text-xs">
-    <div class="font-medium">${esc(m.depart_txt)} <span class="text-slate-400">→</span> ${esc(m.arrivee_txt)}</div>
-    <div class="text-slate-500">${esc(when)}${places} · ${esc(m.nom)} · ${contactLink(m.contact)}</div>
-  </div>`;
-}
-
-function matchSection(r) {
-  const ms = matchesFor(r);
-  if (!ms.length) return '';
-  const key = 'match:' + r.id;
-  const label = r.type === 'offre'
-    ? `${ms.length} demande(s) correspondante(s)`
-    : `${ms.length} offre(s) correspondante(s)`;
-  const body = state.expanded.has(key)
-    ? `<div class="mt-2 space-y-2 border-t border-slate-100 pt-2">${ms.map(miniCard).join('')}</div>`
-    : '';
-  return `<button data-match="${esc(r.id)}" class="text-xs text-teal-700 underline">${label}</button>${body}`;
+async function deleteRow(id, kind) {
+  const store = kind === 'attente' ? 'covo_attente_tokens' : 'covo_tokens';
+  const token = lsGet(store)[id];
+  if (!token) return;
+  if (!confirm('Supprimer cette fiche ?')) return;
+  await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=delete&id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}&kind=${encodeURIComponent(kind || 'trip')}`);
+  await loadData();
 }
 
 // ------------------------------------------------------------------
-// Rejoindre une offre (demandes de places, liste d'attente indicative)
+// Data
 // ------------------------------------------------------------------
-async function loadJoins(rideId) {
-  if (state.joinsCache[rideId]) return;
+async function loadData() {
   try {
-    const res = await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=joins&ride_id=${encodeURIComponent(rideId)}`);
+    const res = await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=list`);
     const data = await res.json();
-    state.joinsCache[rideId] = data.ok ? data.joins : [];
+    state.trips = (data.ok && data.trips) || [];
+    state.attente = (data.ok && data.attente) || [];
+  } catch (e) {
+    state.trips = [];
+    state.attente = [];
+    console.error(e);
+  }
+  render();
+}
+
+function render() {
+  renderTrips();
+  renderAttente();
+  renderMap();
+}
+
+async function loadJoins(tripId) {
+  if (state.joinsCache[tripId]) return;
+  try {
+    const res = await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=joins&trip_id=${encodeURIComponent(tripId)}`);
+    const data = await res.json();
+    state.joinsCache[tripId] = data.ok ? data.joins : [];
   } catch {
-    state.joinsCache[rideId] = [];
+    state.joinsCache[tripId] = [];
   }
 }
 
-function joinSection(r) {
-  const n = Number(r.join_count) || 0;
-  let out = '<div class="flex flex-wrap items-center gap-3 mt-2">';
-  out += state.joined[r.id]
-    ? '<span class="text-xs text-teal-700 font-medium">✓ demande envoyée</span>'
-    : `<button data-join="${esc(r.id)}" class="text-xs bg-teal-700 text-white px-3 py-1.5 rounded-lg font-medium">Rejoindre</button>`;
-  if (n) out += `<button data-joins="${esc(r.id)}" class="text-xs text-teal-700 underline">${n} demande(s)</button>`;
-  out += '</div>';
-  if (state.expanded.has('joinform:' + r.id)) out += joinFormHtml(r);
-  if (state.expanded.has('joins:' + r.id)) out += joinListHtml(r);
-  return out;
+function toggleExpand(key) {
+  if (state.expanded.has(key)) state.expanded.delete(key);
+  else state.expanded.add(key);
+  render();
 }
 
-function joinFormHtml(r) {
-  return `<form data-joinform="${esc(r.id)}" class="mt-2 space-y-2 bg-slate-50 rounded-lg p-3 text-sm">
+// ------------------------------------------------------------------
+// Onglet Trajets
+// ------------------------------------------------------------------
+function seatsLeft(t) {
+  return Math.max(0, (Number(t.places) || 1) - (Number(t.join_seats) || 0));
+}
+
+function tripCard(t) {
+  const tokens = tripTokens();
+  const joins = myJoins();
+  const left = seatsLeft(t);
+  const total = Number(t.places) || 1;
+  const del = tokens[t.id]
+    ? `<button data-del="${esc(t.id)}" data-kind="trip" class="text-xs text-red-500">supprimer</button>` : '';
+
+  let actions = '<div class="flex flex-wrap items-center gap-3 mt-2">';
+  actions += joins[t.id]
+    ? '<span class="text-xs text-teal-700 font-medium">✓ tu es dans ce trajet</span>'
+    : `<button data-join="${esc(t.id)}" class="text-xs bg-teal-700 text-white px-3 py-1.5 rounded-lg font-medium">Rejoindre</button>`;
+  if (Number(t.join_count)) actions += `<button data-joins="${esc(t.id)}" class="text-xs text-teal-700 underline">${esc(t.join_count)} passager(s)</button>`;
+  actions += '<span class="flex-1"></span>' + del + '</div>';
+
+  let sections = '';
+  if (state.expanded.has('joinform:' + t.id)) sections += joinFormHtml(t);
+  if (state.expanded.has('joins:' + t.id)) sections += joinListHtml(t);
+
+  return `
+    <article id="trip-${esc(t.id)}" class="bg-white rounded-xl shadow p-4 border-l-4 border-teal-600">
+      <div class="flex items-start justify-between gap-2">
+        <div class="font-semibold">🚗 ${esc(t.nom)}</div>
+        <span class="shrink-0 text-xs px-2 py-0.5 rounded-full ${left > 0 ? 'bg-teal-100 text-teal-700' : 'bg-amber-100 text-amber-700'}">${left > 0 ? `${left}/${total} place(s)` : 'Complet'}</span>
+      </div>
+      <div class="text-sm text-slate-600 mt-1">${esc(t.depart_txt)} <span class="text-slate-400">→</span> ${esc(CONFIG.EVENT.name)}</div>
+      <div class="text-sm text-slate-600">${esc(whenStr(t))}</div>
+      ${t.commentaire ? `<p class="text-sm text-slate-500 mt-1">${esc(t.commentaire)}</p>` : ''}
+      <div class="text-sm mt-2">${contactLink(t.contact)}</div>
+      ${actions}
+      ${sections}
+    </article>`;
+}
+
+function joinFormHtml(t) {
+  return `<form data-joinform="${esc(t.id)}" class="mt-2 space-y-2 bg-slate-50 rounded-lg p-3 text-sm">
     <input name="nom" required maxlength="60" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Ton prénom" />
     <input name="contact" required maxlength="80" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Téléphone ou email" />
     <input name="places" type="number" min="1" max="9" value="1" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Places demandées" />
@@ -211,11 +174,11 @@ function joinFormHtml(r) {
   </form>`;
 }
 
-function joinListHtml(r) {
-  const joins = state.joinsCache[r.id];
+function joinListHtml(t) {
+  const joins = state.joinsCache[t.id];
   if (!joins) return '<p class="text-xs text-slate-400 mt-2">Chargement…</p>';
-  if (!joins.length) return '<p class="text-xs text-slate-400 mt-2">Aucune demande pour l\u2019instant.</p>';
-  const places = Math.max(1, Number(r.places) || 1);
+  if (!joins.length) return '<p class="text-xs text-slate-400 mt-2">Aucun passager pour l\u2019instant.</p>';
+  const places = Math.max(1, Number(t.places) || 1);
   let used = 0;
   const rows = joins.map((j) => {
     const seats = Math.max(1, Number(j.places) || 1);
@@ -236,13 +199,13 @@ function joinListHtml(r) {
 }
 
 async function submitJoin(e) {
+  const form = e.target;
   e.preventDefault();
-  const form = e.currentTarget;
-  const rideId = form.dataset.joinform;
+  const tripId = form.dataset.joinform;
   const msg = $('.joinmsg', form);
   const payload = Object.fromEntries(new FormData(form).entries());
   payload.action = 'join';
-  payload.ride_id = rideId;
+  payload.trip_id = tripId;
   msg.textContent = 'Envoi…';
   try {
     const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
@@ -252,11 +215,10 @@ async function submitJoin(e) {
     });
     const data = await res.json();
     if (data.ok) {
-      saveJoin(rideId, data.id);
-      state.joined = myJoins();
-      state.expanded.delete('joinform:' + rideId);
-      delete state.joinsCache[rideId];
-      await loadRides();
+      lsPut('covo_joins', tripId, data.id);
+      state.expanded.delete('joinform:' + tripId);
+      delete state.joinsCache[tripId];
+      await loadData();
     } else {
       msg.textContent = data.error || 'Erreur';
     }
@@ -265,109 +227,237 @@ async function submitJoin(e) {
   }
 }
 
-function card(r) {
-  const tokens = myTokens();
-  const del = tokens[r.id]
-    ? `<button data-del="${esc(r.id)}" class="text-xs text-red-500 mt-2">supprimer ma fiche</button>` : '';
-  const places = r.type === 'offre' && r.places ? `<span class="text-slate-500">· ${esc(r.places)} place(s)</span>` : '';
-  const when = [fmtDate(r.date), fmtTime(r.heure)].filter(Boolean).join(' à ');
+function renderTrips() {
+  const el = $('#tabTrips');
+  const trips = [...state.trips].sort((a, b) =>
+    String(a.date).localeCompare(String(b.date)) || String(a.heure).localeCompare(String(b.heure)));
+  const list = trips.length
+    ? trips.map(tripCard).join('')
+    : '<p class="text-center text-slate-400 py-8">Aucun trajet publié pour l\u2019instant.<br>Publie le premier !</p>';
+  el.innerHTML = `
+    <button data-open-trip class="w-full bg-teal-700 text-white font-semibold py-2.5 rounded-lg shadow">+ Publier un trajet</button>
+    ${list}`;
+}
+
+// ------------------------------------------------------------------
+// Onglet Attente (liste globale des passagers en recherche)
+// ------------------------------------------------------------------
+function attenteFormHtml() {
+  return `<form id="attenteForm" class="bg-white rounded-xl shadow p-4 space-y-2 text-sm">
+    <p class="font-semibold">Je cherche un trajet</p>
+    <input name="nom" required maxlength="60" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Ton prénom" />
+    <input name="contact" required maxlength="80" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Téléphone ou email (affiché)" />
+    <div class="geo relative" data-txt="depart_txt" data-lat="lat" data-lng="lng">
+      <input name="depart_txt" autocomplete="off" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Départ souhaité (optionnel)" />
+      <input type="hidden" name="lat" /><input type="hidden" name="lng" />
+      <ul class="geo-suggest hidden absolute bg-white border border-slate-200 rounded-lg shadow w-full mt-1 max-h-48 overflow-auto"></ul>
+    </div>
+    <input name="message" maxlength="200" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Précisions (optionnel) : nb de places, horaires…" />
+    <button type="submit" class="w-full bg-slate-700 text-white font-semibold py-2 rounded-lg">M\u2019inscrire à la liste d\u2019attente</button>
+    <p class="attmsg text-center text-xs text-slate-500"></p>
+  </form>`;
+}
+
+function attenteCard(a) {
+  const del = attenteTokens()[a.id]
+    ? `<button data-del="${esc(a.id)}" data-kind="attente" class="text-xs text-red-500">supprimer</button>` : '';
   return `
-    <article class="bg-white rounded-xl shadow p-4">
-      <div class="flex items-start justify-between gap-2">
-        <div class="font-semibold">${esc(r.depart_txt)} <span class="text-slate-400">→</span> ${esc(r.arrivee_txt)}</div>
-        <span class="shrink-0 text-xs px-2 py-0.5 rounded-full ${r.type === 'offre' ? 'bg-teal-100 text-teal-700' : 'bg-amber-100 text-amber-700'}">${r.type === 'offre' ? 'Offre' : 'Demande'}</span>
-      </div>
-      <div class="text-sm text-slate-600 mt-1">${when ? esc(when) + ' ' : ''}${places}</div>
-      ${r.commentaire ? `<p class="text-sm text-slate-500 mt-1">${esc(r.commentaire)}</p>` : ''}
-      <div class="text-sm mt-2">${esc(r.nom)} · ${contactLink(r.contact)}</div>
-      ${r.type === 'offre' ? joinSection(r) : ''}
-      ${matchSection(r)}
-      ${del}
+    <article id="att-${esc(a.id)}" class="bg-white rounded-xl shadow p-4 border-l-4 border-slate-500">
+      <div class="font-semibold">👤 ${esc(a.nom)}</div>
+      ${a.depart_txt ? `<div class="text-sm text-slate-600 mt-0.5">départ souhaité : ${esc(a.depart_txt)}</div>` : ''}
+      ${a.message ? `<p class="text-sm text-slate-500 mt-1">${esc(a.message)}</p>` : ''}
+      <div class="text-sm mt-2 flex items-center justify-between gap-2">${contactLink(a.contact)}${del}</div>
     </article>`;
 }
 
-function render() {
-  const list = $('#list');
-  const rows = filtered();
-  if (state.tab === 'publier') return;
-  list.innerHTML = rows.length
-    ? rows.map(card).join('')
-    : `<p class="text-center text-slate-400 py-8">Aucun trajet pour l'instant.</p>`;
-  $$('[data-del]', list).forEach((b) => b.addEventListener('click', () => deleteRide(b.dataset.del)));
-  $$('[data-match]', list).forEach((b) =>
-    b.addEventListener('click', () => toggleExpand('match:' + b.dataset.match)));
-  $$('[data-join]', list).forEach((b) =>
-    b.addEventListener('click', () => toggleExpand('joinform:' + b.dataset.join)));
-  $$('[data-joins]', list).forEach((b) =>
-    b.addEventListener('click', async () => {
-      await loadJoins(b.dataset.joins);
-      toggleExpand('joins:' + b.dataset.joins);
-    }));
-  $$('[data-joinform]', list).forEach((f) => f.addEventListener('submit', submitJoin));
-  renderMap(rows);
+function renderAttente() {
+  const el = $('#tabAttente');
+  const mine = attenteTokens();
+  const already = state.attente.some((a) => mine[a.id]);
+  const cards = state.attente.length
+    ? state.attente.map(attenteCard).join('')
+    : '<p class="text-center text-slate-400 py-6">Personne en attente pour l\u2019instant.</p>';
+  el.innerHTML = `
+    ${already ? '<p class="text-xs text-teal-700 font-medium">✓ tu es sur la liste d\u2019attente</p>' : attenteFormHtml()}
+    <p class="text-xs text-slate-400">Conducteur ? Parcourir cette liste et contacter directement les passagers pour leur proposer une place.</p>
+    ${cards}`;
+  const form = $('#attenteForm', el);
+  if (form) {
+    setupGeo($('.geo', form));
+    setupPickers(form);
+  }
 }
 
-function toggleExpand(key) {
-  if (state.expanded.has(key)) state.expanded.delete(key);
-  else state.expanded.add(key);
-  render();
+async function submitAttente(e) {
+  const form = e.target;
+  e.preventDefault();
+  const msg = $('.attmsg', form);
+  const payload = Object.fromEntries(new FormData(form).entries());
+  payload.action = 'attente';
+  msg.textContent = 'Envoi…';
+  try {
+    const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      lsPut('covo_attente_tokens', data.id, data.delete_token);
+      await loadData();
+    } else {
+      msg.textContent = data.error || 'Erreur';
+    }
+  } catch {
+    msg.textContent = 'Erreur réseau';
+  }
+}
+
+// ------------------------------------------------------------------
+// Onglet Infos + modale "Publier un trajet"
+// ------------------------------------------------------------------
+function infosHtml() {
+  const E = CONFIG.EVENT;
+  return `<div class="bg-white rounded-xl shadow p-4 space-y-2 text-sm">
+    <p>${esc(E.description)}</p>
+    <p class="text-slate-600">📅 ${esc([fmtDate(E.date), fmtTime(E.heure)].filter(Boolean).join(' à '))}</p>
+    <p class="text-slate-600">📍 ${esc(E.lieu)}</p>
+    <button data-open-trip class="w-full bg-teal-700 text-white font-semibold py-2.5 rounded-lg mt-2">🚗 Publier un trajet</button>
+    <p class="text-xs text-slate-400 pt-2">Fonctionnement : les conducteurs publient un trajet vers l\u2019événement, les passagers les rejoignent. Si c\u2019est complet, inscris-toi sur la liste d\u2019attente. Contacts affichés en clair, chacun garde la main sur sa fiche.</p>
+  </div>`;
+}
+
+function tripFormHtml() {
+  const E = CONFIG.EVENT;
+  return `<form id="tripForm" class="space-y-3 text-sm">
+    <input name="nom" required maxlength="60" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Ton nom (conducteur)" />
+    <input name="contact" required maxlength="80" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Téléphone (visible des passagers)" />
+    <div class="geo relative" data-txt="depart_txt" data-lat="depart_lat" data-lng="depart_lng">
+      <input name="depart_txt" required autocomplete="off" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Lieu de départ" />
+      <input type="hidden" name="depart_lat" /><input type="hidden" name="depart_lng" />
+      <ul class="geo-suggest hidden absolute bg-white border border-slate-200 rounded-lg shadow w-full mt-1 max-h-48 overflow-auto"></ul>
+    </div>
+    <div class="grid grid-cols-2 gap-2">
+      <input name="date" type="date" value="${esc(E.date || '')}" class="px-3 py-2 rounded-lg border border-slate-300" />
+      <input name="heure" type="time" class="px-3 py-2 rounded-lg border border-slate-300" />
+    </div>
+    <input name="places" type="number" min="1" max="9" value="3" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Places disponibles" />
+    <textarea name="commentaire" maxlength="280" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Commentaire (optionnel) : bagages, fumeur, animaux…"></textarea>
+    <input name="website" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
+    <button type="submit" class="w-full bg-teal-700 text-white font-semibold py-2.5 rounded-lg">Publier mon trajet</button>
+    <p class="formmsg text-center text-sm"></p>
+  </form>`;
+}
+
+function openModal(title, html) {
+  $('#modalTitle').textContent = title;
+  $('#modalBody').innerHTML = html;
+  $('#modal').classList.remove('hidden');
+  const form = $('#tripForm');
+  if (form) {
+    setupGeo($('.geo', form));
+    setupPickers(form);
+    form.addEventListener('submit', submitTrip);
+  }
+}
+function closeModal() { $('#modal').classList.add('hidden'); }
+
+async function submitTrip(e) {
+  const form = e.target;
+  e.preventDefault();
+  const msg = $('.formmsg', form);
+  const payload = Object.fromEntries(new FormData(form).entries());
+  msg.textContent = 'Envoi…';
+  try {
+    const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      lsPut('covo_tokens', data.id, data.delete_token);
+      closeModal();
+      await loadData();
+      switchTab('trajets');
+    } else {
+      msg.textContent = 'Erreur : ' + (data.error || 'inconnue');
+    }
+  } catch {
+    msg.textContent = 'Erreur réseau';
+  }
 }
 
 // ------------------------------------------------------------------
 // Carte
 // ------------------------------------------------------------------
+const pin = (bg, inner, cls = '') => L.divIcon({
+  className: '',
+  html: `<div class="pin ${cls}" style="background:${bg}"><span>${inner}</span></div>`,
+  iconSize: cls === 'pin-event' ? [36, 36] : [30, 30],
+  iconAnchor: cls === 'pin-event' ? [18, 18] : [15, 15],
+});
+
 function initMap() {
-  const c = CONFIG.EVENT ? [CONFIG.EVENT.lat, CONFIG.EVENT.lng] : CONFIG.DEFAULT_CENTER;
-  const z = CONFIG.EVENT ? (CONFIG.EVENT.zoom || 11) : CONFIG.DEFAULT_ZOOM;
-  state.map = L.map('map').setView(c, z);
+  const E = CONFIG.EVENT;
+  state.map = L.map('map', { zoomControl: false }).setView([E.lat, E.lng], E.zoom || 12);
+  L.control.zoom({ position: 'topright' }).addTo(state.map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '&copy; OpenStreetMap',
   }).addTo(state.map);
-  state.overlay = L.layerGroup().addTo(state.map);
+  L.marker([E.lat, E.lng], { icon: pin('#dc2626', '⚑', 'pin-event'), zIndexOffset: 1000 })
+    .bindPopup(`<b>${esc(E.name)}</b><br>${esc(E.lieu)}<br>${esc([fmtDate(E.date), fmtTime(E.heure)].filter(Boolean).join(' à '))}`)
+    .addTo(state.map);
+  state.cluster = (L.markerClusterGroup ? L.markerClusterGroup({ showCoverageOnHover: false }) : L.layerGroup())
+    .addTo(state.map);
 }
 
-const icon = (color) => L.divIcon({
-  className: '',
-  html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 0 3px rgba(0,0,0,.5)"></div>`,
-  iconSize: [14, 14], iconAnchor: [7, 7],
-});
-
-function renderMap(rows) {
-  if (!state.map || !state.overlay) return;
-  state.overlay.clearLayers();
-  const bounds = [];
-  rows.forEach((r) => {
-    const hasD = r.depart_lat && r.depart_lng;
-    const hasA = r.arrivee_lat && r.arrivee_lng;
-    const lineColor = r.type === 'offre' ? '#0f766e' : '#d97706';
-    if (hasD && hasA) {
-      L.polyline([[+r.depart_lat, +r.depart_lng], [+r.arrivee_lat, +r.arrivee_lng]],
-        { color: lineColor, weight: 3, opacity: 0.7 }).addTo(state.overlay);
-    }
-    if (hasD) {
-      L.marker([+r.depart_lat, +r.depart_lng], { icon: icon('#0f766e') })
-        .bindPopup(`<b>Départ</b> ${esc(r.depart_txt)}<br>${esc(r.nom)} · ${esc(fmtDate(r.date))} ${esc(fmtTime(r.heure))}`)
-        .addTo(state.overlay);
-      bounds.push([+r.depart_lat, +r.depart_lng]);
-    }
-    if (hasA) {
-      L.marker([+r.arrivee_lat, +r.arrivee_lng], { icon: icon('#d97706') })
-        .bindPopup(`<b>Arrivée</b> ${esc(r.arrivee_txt)}<br>${esc(r.nom)}`)
-        .addTo(state.overlay);
-      bounds.push([+r.arrivee_lat, +r.arrivee_lng]);
-    }
+function renderMap() {
+  if (!state.map || !state.cluster) return;
+  state.cluster.clearLayers();
+  const E = CONFIG.EVENT;
+  const pts = [[E.lat, E.lng]];
+  state.trips.forEach((t) => {
+    if (!t.depart_lat || !t.depart_lng) return;
+    const ll = [+t.depart_lat, +t.depart_lng];
+    pts.push(ll);
+    const left = seatsLeft(t);
+    L.marker(ll, { icon: pin('#0f766e', '🚗') })
+      .bindPopup(`<b>🚗 ${esc(t.nom)}</b><br>${esc(t.depart_txt)}<br>${esc(whenStr(t))}<br>${left > 0 ? `${left} place(s) libre(s)` : 'Complet'}<br><a href="#" onclick="focusTrip('${esc(t.id)}');return false;" class="text-teal-700 underline">Voir la fiche</a>`)
+      .addTo(state.cluster);
   });
-  if (bounds.length > 1) state.map.fitBounds(bounds, { padding: [30, 30] });
+  state.attente.forEach((a) => {
+    if (!a.lat || !a.lng) return;
+    const ll = [+a.lat, +a.lng];
+    pts.push(ll);
+    L.marker(ll, { icon: pin('#334155', '👤') })
+      .bindPopup(`<b>👤 ${esc(a.nom)}</b>${a.depart_txt ? `<br>départ souhaité : ${esc(a.depart_txt)}` : ''}<br><span class="text-slate-500">en attente d\u2019un trajet</span>`)
+      .addTo(state.cluster);
+  });
+  if (pts.length > 1) state.map.fitBounds(pts, { padding: [40, 160], maxZoom: 13 });
 }
+
+// Depuis un popup marker : ouvrir la fiche correspondante dans le sheet.
+window.focusTrip = function (id) {
+  switchTab('trajets');
+  $('#sheet').classList.add('expanded');
+  const el = document.getElementById('trip-' + id);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('ring-2', 'ring-teal-500');
+    setTimeout(() => el.classList.remove('ring-2', 'ring-teal-500'), 1500);
+  }
+};
 
 // ------------------------------------------------------------------
 // Geocodage (autocompletion via proxy Apps Script)
 // ------------------------------------------------------------------
 function setupGeo(box) {
-  const input = $('input[name$="_txt"]', box);
-  const latEl = $('input[name$="_lat"]', box);
-  const lngEl = $('input[name$="_lng"]', box);
+  const names = { txt: 'depart_txt', lat: 'lat', lng: 'lng', ...box.dataset };
+  const input = $(`input[name="${names.txt}"]`, box);
+  const latEl = $(`input[name="${names.lat}"]`, box);
+  const lngEl = $(`input[name="${names.lng}"]`, box);
   const sug = $('.geo-suggest', box);
   let timer;
   input.addEventListener('input', () => {
@@ -396,85 +486,24 @@ function setupGeo(box) {
 }
 
 // ------------------------------------------------------------------
-// Formulaire
-// ------------------------------------------------------------------
-function setupForm() {
-  const form = $('#rideForm');
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const msg = $('#formMsg');
-    const fd = new FormData(form);
-    const payload = Object.fromEntries(fd.entries());
-    msg.textContent = 'Envoi…'; msg.className = 'text-center text-sm text-slate-500';
-    try {
-      const res = await fetch(CONFIG.APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evite le preflight CORS
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        saveToken(data.id, data.delete_token);
-        form.reset();
-        msg.textContent = 'Publié ! Merci.'; msg.className = 'text-center text-sm text-teal-700';
-        await loadRides();
-        setTimeout(() => switchTab(state.tab === 'publier' ? 'offres' : state.tab), 800);
-      } else {
-        msg.textContent = 'Erreur : ' + (data.error || 'inconnue'); msg.className = 'text-center text-sm text-red-600';
-      }
-    } catch (err) {
-      msg.textContent = 'Erreur réseau'; msg.className = 'text-center text-sm text-red-600';
-    }
-  });
-}
-
-// ------------------------------------------------------------------
-// Tabs + filtres
+// Tabs + bottom sheet + modale
 // ------------------------------------------------------------------
 function switchTab(tab) {
   state.tab = tab;
   $$('.tab').forEach((b) => {
     const active = b.dataset.tab === tab;
-    b.classList.toggle('bg-teal-600', active);
-    b.classList.toggle('text-white', active);
-    b.classList.toggle('border-teal-600', active);
-    b.classList.toggle('bg-white', !active);
-    b.classList.toggle('border-slate-200', !active);
+    b.classList.toggle('bg-white', active);
+    b.classList.toggle('shadow', active);
+    b.classList.toggle('text-slate-800', active);
+    b.classList.toggle('text-slate-500', !active);
   });
-  const isForm = tab === 'publier';
-  $('#formWrap').classList.toggle('hidden', !isForm);
-  $('#list').classList.toggle('hidden', isForm);
-  $('#filters').classList.toggle('hidden', isForm);
-  if (!isForm) render();
+  $('#tabTrips').classList.toggle('hidden', tab !== 'trajets');
+  $('#tabAttente').classList.toggle('hidden', tab !== 'attente');
+  $('#tabInfos').classList.toggle('hidden', tab !== 'infos');
 }
 
-function setupTabs() {
-  $$('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
-}
-
-function setupFilters() {
-  $('#fOrigin').addEventListener('input', (e) => { state.filters.origin = e.target.value; render(); });
-  $('#fDest').addEventListener('input', (e) => { state.filters.dest = e.target.value; render(); });
-  $('#fDate').addEventListener('input', (e) => { state.filters.date = e.target.value; render(); });
-}
-
-function setupMapToggle() {
-  $('#toggleMap').addEventListener('click', () => {
-    const wrap = $('#mapWrap');
-    wrap.classList.toggle('hidden');
-    if (!state.map && !wrap.classList.contains('hidden')) initMap();
-    if (state.map) setTimeout(() => state.map.invalidateSize(), 50);
-  });
-}
-
-// ------------------------------------------------------------------
-// Pickers date/heure natifs (clic sur tout le champ = calendrier)
-// ------------------------------------------------------------------
-function setupPickers() {
-  const today = new Date().toISOString().slice(0, 10);
-  const formDate = $('#rideForm input[name="date"]');
-  if (formDate) formDate.min = today; // pas de trajet dans le passe
-  $$('input[type="date"], input[type="time"]').forEach((el) => {
+function setupPickers(scope) {
+  $$('input[type="date"], input[type="time"]', scope).forEach((el) => {
     el.style.cursor = 'pointer';
     el.addEventListener('click', () => { try { el.showPicker(); } catch (e) {} });
   });
@@ -484,15 +513,39 @@ function setupPickers() {
 // Init
 // ------------------------------------------------------------------
 function init() {
-  state.joined = myJoins();
-  if (CONFIG.EVENT) $('#siteTitle').textContent = 'Pars-tu ? · ' + CONFIG.EVENT.name;
+  const E = CONFIG.EVENT;
+  $('#eventName').textContent = '· ' + E.name;
+  $('#sheetTitle').textContent = E.name;
+  $('#sheetPlace').textContent = '📍 ' + E.lieu;
+  $('#sheetDate').textContent = '📅 ' + [fmtDate(E.date), fmtTime(E.heure)].filter(Boolean).join(' à ');
+  $('#tabInfos').innerHTML = infosHtml();
+
   initMap();
-  setupTabs();
-  setupFilters();
-  setupMapToggle();
-  setupForm();
-  setupPickers();
-  $$('.geo').forEach(setupGeo);
-  loadRides().then(() => setTimeout(() => state.map && state.map.invalidateSize(), 50));
+  $$('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+  $('#sheetToggle').addEventListener('click', () => {
+    $('#sheet').classList.toggle('expanded');
+    setTimeout(() => state.map && state.map.invalidateSize(), 120);
+  });
+  $('#modalClose').addEventListener('click', closeModal);
+  $('#modal').addEventListener('click', (e) => { if (e.target === $('#modal')) closeModal(); });
+
+  // Delegations (contenu dynamiquement re-rendu)
+  document.addEventListener('click', (e) => {
+    let el;
+    if ((el = e.target.closest('[data-open-trip]'))) { openModal('Publier un trajet', tripFormHtml()); return; }
+    if ((el = e.target.closest('[data-del]'))) { deleteRow(el.dataset.del, el.dataset.kind); return; }
+    if ((el = e.target.closest('[data-join]'))) { toggleExpand('joinform:' + el.dataset.join); return; }
+    if ((el = e.target.closest('[data-joins]'))) {
+      loadJoins(el.dataset.joins).then(() => toggleExpand('joins:' + el.dataset.joins));
+      return;
+    }
+  });
+  document.addEventListener('submit', (e) => {
+    if (e.target.matches('[data-joinform]')) submitJoin(e);
+    if (e.target.matches('#attenteForm')) submitAttente(e);
+  });
+
+  switchTab('trajets');
+  loadData().then(() => setTimeout(() => state.map && state.map.invalidateSize(), 50));
 }
 document.addEventListener('DOMContentLoaded', init);

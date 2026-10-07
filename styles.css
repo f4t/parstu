@@ -3,3 +3,31 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 #map .leaflet-container { font: inherit; }
 /* evite le zoom moche sur inputs iOS */
 input, textarea, select { font-size: 16px; }
+
+/* Bottom sheet : etats replie / etale */
+#sheetBody { max-height: 40vh; }
+#sheet.expanded #sheetBody { max-height: 72vh; }
+#sheet.expanded #chevron { transform: rotate(180deg); }
+
+/* Pins custom (event / conducteur / attente) */
+.pin {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; line-height: 1;
+}
+.pin-event { width: 36px; height: 36px; }
+
+/* Clusters : reprise du style Caroster (cercle teal) */
+.marker-cluster-small, .marker-cluster-small div,
+.marker-cluster-medium, .marker-cluster-medium div,
+.marker-cluster-large, .marker-cluster-large div {
+  background-color: rgba(15, 118, 110, .35);
+}
+.marker-cluster div { color: #0f766e; font-weight: 700; }
+
+/* Suggestion geocodage au-dessus des champs */
+.geo-suggest { z-index: 800; }
+
+/* Carte sous le header/bottom sheet : padding visuel via zoom, pas de scroll body */
+body { overflow: hidden; }

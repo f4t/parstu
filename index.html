@@ -8,78 +8,59 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased">
+<body class="bg-slate-100 text-slate-800 antialiased">
 
-  <header class="bg-teal-700 text-white px-4 py-3 sticky top-0 z-[500] shadow">
-    <div class="max-w-3xl mx-auto flex items-center justify-between">
-      <h1 id="siteTitle" class="font-bold text-lg leading-tight">Pars-tu&nbsp;? 🚗</h1>
-      <button id="toggleMap" class="text-sm bg-teal-600 hover:bg-teal-500 rounded px-3 py-1.5">Carte</button>
+  <!-- Carte plein écran -->
+  <div id="map" class="fixed inset-0 z-0"></div>
+
+  <!-- Bandeau haut -->
+  <header class="fixed top-3 left-3 right-3 z-[450] pointer-events-none">
+    <div class="bg-white rounded-full shadow-lg px-4 py-2 flex items-center gap-2 max-w-md pointer-events-auto">
+      <span class="text-lg leading-none">🚗</span>
+      <span id="siteTitle" class="font-bold leading-tight">Pars-tu&nbsp;?</span>
+      <span id="eventName" class="text-sm text-slate-500 truncate"></span>
     </div>
   </header>
 
-  <!-- Onglets -->
-  <nav class="max-w-3xl mx-auto px-4 pt-3 flex gap-2 text-sm">
-    <button data-tab="offres" class="tab flex-1 py-2 rounded-lg font-medium bg-white shadow border border-teal-600 text-teal-700">Offres</button>
-    <button data-tab="demandes" class="tab flex-1 py-2 rounded-lg font-medium bg-white shadow border border-slate-200">Demandes</button>
-    <button data-tab="publier" class="tab flex-1 py-2 rounded-lg font-medium bg-white shadow border border-slate-200">+ Publier</button>
-  </nav>
-
-  <!-- Filtres -->
-  <section id="filters" class="max-w-3xl mx-auto px-4 pt-3 grid grid-cols-2 gap-2 text-sm">
-    <input id="fOrigin" class="col-span-2 sm:col-span-1 px-3 py-2 rounded-lg border border-slate-300" placeholder="Origine" />
-    <input id="fDest" class="col-span-2 sm:col-span-1 px-3 py-2 rounded-lg border border-slate-300" placeholder="Destination" />
-    <input id="fDate" type="date" class="col-span-2 px-3 py-2 rounded-lg border border-slate-300" />
+  <!-- Bottom sheet -->
+  <section id="sheet" class="fixed inset-x-0 bottom-0 z-[450] bg-white rounded-t-2xl shadow-2xl flex flex-col max-w-3xl mx-auto">
+    <button id="sheetToggle" aria-label="Agrandir" class="mx-auto mt-1.5 p-1 text-slate-400 leading-none">
+      <svg id="chevron" class="w-6 h-6 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/></svg>
+    </button>
+    <div class="px-4 pb-2">
+      <h2 id="sheetTitle" class="text-xl font-bold leading-tight"></h2>
+      <p id="sheetPlace" class="text-sm text-slate-500 mt-0.5"></p>
+      <p id="sheetDate" class="text-sm text-slate-500"></p>
+    </div>
+    <nav class="px-4 pb-2">
+      <div class="flex gap-1 bg-slate-100 rounded-lg p-1 text-sm">
+        <button data-tab="trajets" class="tab flex-1 py-1.5 rounded-md font-medium">Trajets</button>
+        <button data-tab="attente" class="tab flex-1 py-1.5 rounded-md font-medium">Attente</button>
+        <button data-tab="infos" class="tab flex-1 py-1.5 rounded-md font-medium">Infos</button>
+      </div>
+    </nav>
+    <div id="sheetBody" class="overflow-y-auto px-4 pb-6 space-y-3">
+      <div id="tabTrips"></div>
+      <div id="tabAttente" class="hidden"></div>
+      <div id="tabInfos" class="hidden"></div>
+    </div>
   </section>
 
-  <!-- Carte -->
-  <section id="mapWrap" class="max-w-3xl mx-auto px-4 pt-3">
-    <div id="map" class="h-80 w-full rounded-lg shadow z-0"></div>
-  </section>
-
-  <!-- Liste -->
-  <main id="list" class="max-w-3xl mx-auto px-4 py-4 space-y-3"></main>
-
-  <!-- Formulaire publier -->
-  <section id="formWrap" class="max-w-3xl mx-auto px-4 py-4 hidden">
-    <form id="rideForm" class="bg-white rounded-xl shadow p-4 space-y-3 text-sm">
-      <div class="grid grid-cols-2 gap-2">
-        <label class="flex items-center gap-2"><input type="radio" name="type" value="offre" checked /> J'offre</label>
-        <label class="flex items-center gap-2"><input type="radio" name="type" value="demande" /> Je cherche</label>
+  <!-- Modale (form trajet / form attente) -->
+  <div id="modal" class="fixed inset-0 z-[700] hidden bg-black/40 flex items-end sm:items-center justify-center">
+    <div class="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl p-4 max-h-[85vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-3">
+        <h3 id="modalTitle" class="font-bold text-lg"></h3>
+        <button id="modalClose" class="text-slate-400 text-2xl leading-none" aria-label="Fermer">×</button>
       </div>
-      <input name="nom" required maxlength="60" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Ton prénom / nom" />
-      <input name="contact" required maxlength="80" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Téléphone ou email (affiché publiquement)" />
-
-      <div class="geo relative">
-        <input name="depart_txt" required autocomplete="off" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Départ (ville / adresse)" />
-        <input type="hidden" name="depart_lat" /><input type="hidden" name="depart_lng" />
-        <ul class="geo-suggest hidden absolute z-[600] bg-white border border-slate-200 rounded-lg shadow w-full mt-1 max-h-48 overflow-auto"></ul>
-      </div>
-      <div class="geo relative">
-        <input name="arrivee_txt" required autocomplete="off" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Arrivée (ville / adresse)" />
-        <input type="hidden" name="arrivee_lat" /><input type="hidden" name="arrivee_lng" />
-        <ul class="geo-suggest hidden absolute z-[600] bg-white border border-slate-200 rounded-lg shadow w-full mt-1 max-h-48 overflow-auto"></ul>
-      </div>
-
-      <div class="grid grid-cols-2 gap-2">
-        <input name="date" type="date" class="px-3 py-2 rounded-lg border border-slate-300" />
-        <input name="heure" type="time" class="px-3 py-2 rounded-lg border border-slate-300" />
-      </div>
-      <input name="places" type="number" min="1" max="9" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Places (conducteur)" />
-      <textarea name="commentaire" maxlength="280" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-300" placeholder="Commentaire (optionnel) : bagages, fumeur, animaux…"></textarea>
-
-      <!-- honeypot anti-bot, caché -->
-      <input name="website" tabindex="-1" autocomplete="off" class="hidden" aria-hidden="true" />
-
-      <button type="submit" class="w-full bg-teal-700 text-white font-semibold py-2.5 rounded-lg">Publier</button>
-      <p id="formMsg" class="text-center text-sm"></p>
-    </form>
-  </section>
-
-  <footer class="max-w-3xl mx-auto px-4 py-6 text-center text-xs text-slate-400">
-    Pars-tu&nbsp;? · site temporaire · données publiques · contact affiché en clair
-  </footer>
+      <div id="modalBody"></div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
